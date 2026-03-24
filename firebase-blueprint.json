@@ -1,0 +1,130 @@
+{
+  "entities": {
+    "VideoClone": {
+      "title": "Video Clone",
+      "description": "A record of a cloned video with extracted text, template, and audio analysis.",
+      "type": "object",
+      "properties": {
+        "url": { "type": "string", "description": "The original URL of the video or channel." },
+        "type": { "type": "string", "enum": ["direct", "short", "post", "channel", "playlist"], "description": "The type of content." },
+        "status": { "type": "string", "enum": ["pending", "processing", "completed", "error"], "description": "The current processing status." },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "duration": { "type": "number" },
+            "dimensions": { "type": "string" },
+            "isShort": { "type": "boolean" },
+            "sceneCount": { "type": "number" }
+          }
+        },
+        "scenes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "timestamp": { "type": "number" },
+              "imageRef": { "type": "string" },
+              "text": { "type": "string" },
+              "templateInfo": { "type": "object" }
+            }
+          }
+        },
+        "audioAnalysis": {
+          "type": "object",
+          "properties": {
+            "musicStyle": { "type": "string" },
+            "rhythm": { "type": "string" },
+            "voiceOver": { "type": "boolean" },
+            "soundEffects": { "type": "boolean" }
+          }
+        },
+        "fullTranscript": { "type": "string" },
+        "visualTemplate": {
+          "type": "object",
+          "properties": {
+            "position": { "type": "string" },
+            "fontSize": { "type": "number" },
+            "alignment": { "type": "string" },
+            "colors": { "type": "object" },
+            "transitions": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "confidenceScore": { "type": "number" },
+        "ocrErrors": { "type": "array", "items": { "type": "string" } },
+        "executionTime": { "type": "number" },
+        "isReference": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      },
+      "required": ["url", "userId", "createdAt"]
+    },
+    "ScheduledVideo": {
+      "title": "Scheduled Video",
+      "description": "A video generated and scheduled for YouTube.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "overlayText": { "type": "string" },
+        "veoPrompt": { "type": "string" },
+        "category": { "type": "string" },
+        "template": { "type": "string", "enum": ["modern", "cinematic", "bold"] },
+        "status": { "type": "string", "enum": ["pending", "generating", "scheduled", "published", "error"] },
+        "scheduledDate": { "type": "string" },
+        "scheduledTime": { "type": "string" },
+        "rawTimestamp": { "type": "number" },
+        "videoUrl": { "type": "string" },
+        "thumbnail": { "type": "string" },
+        "batchId": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "overlayText", "veoPrompt", "category", "template", "status", "rawTimestamp", "userId", "createdAt"]
+    },
+    "AutomationBatch": {
+      "title": "Automation Batch",
+      "description": "A batch of automated videos.",
+      "type": "object",
+      "properties": {
+        "niche": { "type": "string" },
+        "frequency": { "type": "string", "enum": ["daily", "weekly"] },
+        "totalVideos": { "type": "number" },
+        "completedVideos": { "type": "number" },
+        "status": { "type": "string", "enum": ["running", "completed", "error"] },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["niche", "frequency", "totalVideos", "completedVideos", "status", "userId", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "User information and preferences.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] }
+      },
+      "required": ["uid", "email"]
+    }
+  },
+  "firestore": {
+    "/videoClones/{cloneId}": {
+      "schema": "VideoClone",
+      "description": "Collection of video clones."
+    },
+    "/scheduledVideos/{videoId}": {
+      "schema": "ScheduledVideo",
+      "description": "Collection of scheduled videos."
+    },
+    "/automationBatches/{batchId}": {
+      "schema": "AutomationBatch",
+      "description": "Collection of automation batches."
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile documents."
+    }
+  }
+}

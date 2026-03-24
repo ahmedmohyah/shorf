@@ -1,0 +1,122 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (Firebase Auth UID)
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required)
+    //   - displayName: string (optional)
+    //   - photoURL: string (optional)
+    //   - role: string (optional, enum: ['admin', 'user'])
+    //
+    // Collection: videoClones
+    // Document ID: cloneId (auto-generated)
+    // Fields:
+    //   - url: string (required)
+    //   - userId: string (required)
+    //   - createdAt: timestamp (required)
+    //   - status: string (optional, enum: ['pending', 'processing', 'completed', 'error'])
+    //   - type: string (optional)
+    //   - metadata: map (optional)
+    //   - scenes: list (optional)
+    //   - audioAnalysis: map (optional)
+    //   - fullTranscript: string (optional)
+    //   - visualTemplate: map (optional)
+    //   - confidenceScore: number (optional)
+    //   - ocrErrors: list (optional)
+    //   - executionTime: number (optional)
+    //   - isReference: bool (optional)
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "ahmedaoo679@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.uid is string &&
+             data.email is string &&
+             (!('role' in data) || data.role in ['admin', 'user']);
+    }
+
+    function isValidVideoClone(data) {
+      return data.keys().hasAll(['url', 'userId', 'createdAt']) &&
+             data.url is string &&
+             data.userId is string &&
+             data.createdAt is timestamp &&
+             (!('status' in data) || data.status in ['pending', 'processing', 'completed', 'error']);
+    }
+
+    function isValidScheduledVideo(data) {
+      return data.keys().hasAll(['title', 'overlayText', 'veoPrompt', 'category', 'template', 'status', 'rawTimestamp', 'userId', 'createdAt']) &&
+             data.title is string &&
+             data.overlayText is string &&
+             data.veoPrompt is string &&
+             data.category is string &&
+             data.template in ['modern', 'cinematic', 'bold'] &&
+             data.status in ['pending', 'generating', 'scheduled', 'published', 'error'] &&
+             data.rawTimestamp is number &&
+             data.userId is string &&
+             data.createdAt is string; // Using ISO string for simplicity in frontend
+    }
+
+    function isValidAutomationBatch(data) {
+      return data.keys().hasAll(['niche', 'frequency', 'totalVideos', 'completedVideos', 'status', 'userId', 'createdAt']) &&
+             data.niche is string &&
+             data.frequency in ['daily', 'weekly'] &&
+             data.totalVideos is number &&
+             data.completedVideos is number &&
+             data.status in ['running', 'completed', 'error'] &&
+             data.userId is string &&
+             data.createdAt is string;
+    }
+
+    // Rules for User Profiles
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == 'user' || isAdmin());
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && (request.resource.data.role == resource.data.role || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Rules for Video Clones
+    match /videoClones/{cloneId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidVideoClone(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin()) && isValidVideoClone(request.resource.data);
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+    // Rules for Scheduled Videos
+    match /scheduledVideos/{videoId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidScheduledVideo(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin()) && isValidScheduledVideo(request.resource.data);
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // Rules for Automation Batches
+    match /automationBatches/{batchId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidAutomationBatch(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin()) && isValidAutomationBatch(request.resource.data);
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+  }
+}
