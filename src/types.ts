@@ -1,4 +1,4 @@
-export type ViewType = 'dashboard' | 'research' | 'script' | 'studio' | 'publish' | 'library' | 'music' | 'keys' | 'clones';
+export type ViewType = 'dashboard' | 'research' | 'script' | 'studio' | 'publish' | 'library' | 'music' | 'keys' | 'clones' | 'youtube-connect' | 'schedule';
 
 export interface VideoProject {
   id: string;

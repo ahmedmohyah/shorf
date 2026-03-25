@@ -9,6 +9,8 @@ import { PublishView } from './components/views/PublishView';
 import { MusicLibraryView } from './components/views/MusicLibraryView';
 import { KeysView } from './components/views/KeysView';
 import { CloneLibraryView } from './components/views/CloneLibraryView';
+import { YouTubeConnectView } from './components/views/YouTubeConnectView';
+import { ScheduleView } from './components/views/ScheduleView';
 import { ViewType } from './types';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, User } from 'firebase/auth';
@@ -97,6 +99,8 @@ export default function App() {
       case 'publish': return <PublishView />;
       case 'keys': return <KeysView />;
       case 'clones': return <CloneLibraryView />;
+      case 'youtube-connect': return <YouTubeConnectView />;
+      case 'schedule': return <ScheduleView />;
       default: return <DashboardView />;
     }
   };

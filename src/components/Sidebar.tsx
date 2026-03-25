@@ -11,7 +11,8 @@ import {
   Music,
   Key,
   Database,
-  LogOut
+  LogOut,
+  Youtube
 } from 'lucide-react';
 import { ViewType } from '../types';
 import { auth } from '../firebase';
@@ -33,9 +34,9 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
     { id: 'script', label: 'توليد النصوص', icon: FileText },
     { id: 'studio', label: 'استوديو Veo 3.1', icon: Video },
     { id: 'library', label: 'مكتبة الفيديوهات', icon: Library },
-    { id: 'music', label: 'مكتبة الموسيقى', icon: Music },
-    { id: 'publish', label: 'النشر والجدولة', icon: CalendarClock },
-    { id: 'keys', label: 'المفاتيح والاتصال', icon: Key },
+    { id: 'schedule', label: 'النشر والجدولة', icon: CalendarClock },
+    { id: 'youtube-connect', label: 'ربط يوتيوب', icon: Youtube },
+    { id: 'keys', label: 'مفاتيح API', icon: Key },
   ];
 
   return (
