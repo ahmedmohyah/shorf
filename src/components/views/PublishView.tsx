@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Calendar as CalendarIcon, Clock, Youtube, Send, CheckCircle2, Wand2, Loader2, Play, Settings, AlertCircle, Link, Brain, Shuffle, Laugh, BookOpen, ChevronRight, Plus, Trash2, Ghost, Zap, CalendarDays, CalendarRange, MonitorPlay } from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
+import { retryWithBackoff, getCurrentApiKey } from '../../lib/ai-client';
 import { db, auth } from '../../firebase';
 import { collection, addDoc, updateDoc, doc, serverTimestamp, query, where, getDocs, deleteDoc } from 'firebase/firestore';
 
@@ -8,6 +8,7 @@ interface ScheduledVideo {
   id: string;
   title: string;
   overlayText: string;
+  description?: string;
   veoPrompt: string;
   scheduledDate: string;
   scheduledTime: string;
@@ -57,26 +58,48 @@ export function PublishView() {
   const [expandedChannels, setExpandedChannels] = useState<Record<string, boolean>>({});
   const [queue, setQueue] = useState<ScheduledVideo[]>([]);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [videoToPublish, setVideoToPublish] = useState<ScheduledVideo | null>(null);
+  const [isChannelSelectionOpen, setIsChannelSelectionOpen] = useState(false);
+  const [publishNow, setPublishNow] = useState(true);
+  const [scheduledTime, setScheduledTime] = useState<string>(() => {
+    const date = new Date();
+    date.setHours(date.getHours() + 1);
+    return date.toISOString().slice(0, 16);
+  });
 
   useEffect(() => {
     // Check initial status
     const checkStatus = async () => {
       try {
         const res = await fetch('/api/auth/youtube/status');
-        const data = await res.json();
-        setIsYoutubeConnected(data.connected);
-        setIsConfigSet(data.configSet);
-        if (data.clientId) setClientId(data.clientId);
+        const contentType = res.headers.get("content-type");
         
-        if (data.connected) {
-          const verifyRes = await fetch('/api/auth/youtube/verify-token');
-          const verifyData = await verifyRes.json();
-          if (verifyData.valid) {
-            setChannels(verifyData.channels || []);
-            if (verifyData.channels && verifyData.channels.length > 0) {
-              setSelectedChannelId(verifyData.channels[0].id);
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "فشل في التحقق من حالة يوتيوب");
+          setIsYoutubeConnected(data.connected);
+          setIsConfigSet(data.configSet);
+          if (data.clientId) setClientId(data.clientId);
+          
+          if (data.connected) {
+            const verifyRes = await fetch('/api/auth/youtube/verify-token');
+            const verifyContentType = verifyRes.headers.get("content-type");
+            if (verifyContentType && verifyContentType.indexOf("application/json") !== -1) {
+              const verifyData = await verifyRes.json();
+              if (verifyRes.ok && verifyData.valid) {
+                setChannels(verifyData.channels || []);
+                if (verifyData.channels && verifyData.channels.length > 0) {
+                  setSelectedChannelId(verifyData.channels[0].id);
+                }
+              }
+            } else {
+              const text = await verifyRes.text();
+              console.error(text || "فشل في التحقق من الرمز");
             }
           }
+        } else {
+          const text = await res.text();
+          throw new Error(text || "فشل في التحقق من حالة يوتيوب");
         }
       } catch (e) {
         console.error("Failed to check YouTube status", e);
@@ -300,12 +323,6 @@ export function PublishView() {
         await window.aistudio.openSelectKey();
       }
 
-      // @ts-ignore
-      const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
-      if (!apiKey) throw new Error("لم يتم العثور على مفتاح API.");
-
-      const ai = new GoogleGenAI({ apiKey });
-
       const totalDays = frequency === 'weekly' ? 7 : 1;
       let allGeneratedItems: any[] = [];
 
@@ -325,29 +342,32 @@ export function PublishView() {
 كل فيديو يجب أن يحتوي على:
 1. عنوان جذاب جداً يثير الفضول (title).
 2. نص مؤثر يظهر على الشاشة (overlayText) يجب أن يكون من 6 إلى 10 أسطر (طول مناسب للقراءة).
-3. وصف باللغة الإنجليزية لمشهد طبيعي ليتم توليده عبر نموذج الذكاء الاصطناعي (veoPrompt).
-   **هام جداً بخصوص الصوت والمشهد:** المشهد يجب أن يكون طبيعياً، ويجب أن ينص الوصف الإنجليزي صراحة على استخدام أصوات الطبيعة (Nature sounds, ambient sounds like wind, water, birds) ويمنع منعاً باتاً وجود أي موسيقى (NO MUSIC, strictly nature sounds only).
+3. وصف باللغة الإنجليزية لمشهد طبيعي عمودي (Vertical 9:16) ليتم توليده عبر نموذج الذكاء الاصطناعي (veoPrompt).
+   **هام جداً بخصوص التكوين والصوت:** المشهد يجب أن يكون عمودياً (Vertical) ومناسباً لشاشة الهاتف، ويجب أن ينص الوصف الإنجليزي صراحة على استخدام أصوات الطبيعة (Nature sounds, ambient sounds like wind, water, birds) ويمنع منعاً باتاً وجود أي موسيقى (NO MUSIC, strictly nature sounds only).
 4. التصنيف (category) باللغة العربية.
 5. القالب (template): اختر واحداً من القوالب الاحترافية التالية بخطوط كبيرة وواضحة: "modern" (عصري)، "cinematic" (سينمائي)، أو "bold" (عريض).
+7. أضف وسم #Shorts في نهاية الوصف (description) لضمان ظهوره كفيديو قصير، واجعل الوصف جذاباً باللغة العربية.
+8. **تنبيه:** يجب أن يكون الفيديو عمودياً بالكامل (Full Vertical 9:16).
 
 قم بإرجاع النتيجة بصيغة JSON Array فقط، بدون أي نص إضافي، بهذا الشكل:
 [
   {
     "title": "عنوان الفيديو",
     "overlayText": "السطر الأول\\nالسطر الثاني\\nالسطر الثالث\\nالسطر الرابع\\nالسطر الخامس\\nالسطر السادس",
-    "veoPrompt": "Cinematic nature scene... Sound: Nature ambient sounds, wind, birds. NO MUSIC.",
+    "veoPrompt": "Vertical 9:16 cinematic nature scene... Sound: Nature ambient sounds, wind, birds. NO MUSIC.",
     "category": "نفسية",
-    "template": "modern"
+    "template": "modern",
+    "description": "وصف الفيديو مع وسم #Shorts"
   }
 ]`;
 
-        const response = await ai.models.generateContent({
+        const response = await retryWithBackoff((ai) => ai.models.generateContent({
           model: 'gemini-3.1-pro-preview',
           contents: prompt,
           config: {
             responseMimeType: "application/json",
           }
-        });
+        }));
 
         const text = response.text || "[]";
         const generatedItems = JSON.parse(text);
@@ -395,6 +415,7 @@ export function PublishView() {
           id: Math.random().toString(36).substring(7),
           title: item.title,
           overlayText: item.overlayText,
+          description: item.description || `${item.overlayText}\n\n#Shorts`,
           veoPrompt: item.veoPrompt,
           category: item.category || 'عام',
           template: item.template || 'modern',
@@ -450,6 +471,7 @@ export function PublishView() {
         const videoRef = await addDoc(collection(db, 'scheduledVideos'), {
           title: video.title,
           overlayText: video.overlayText,
+          description: video.description || `${video.overlayText}\n\n#Shorts`,
           veoPrompt: video.veoPrompt,
           category: video.category,
           template: video.template,
@@ -477,35 +499,34 @@ export function PublishView() {
         });
       }
 
-      // @ts-ignore
-      const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
-      if (!apiKey) throw new Error("لم يتم العثور على مفتاح API.");
-
-      const ai = new GoogleGenAI({ apiKey });
-      
       setQueue(prev => prev.map(v => v.id === video.id ? { ...v, progress: 30, progressDetail: 'جاري توليد الفيديو (Veo 3.1)...' } : v));
       await updateDoc(doc(db, 'scheduledVideos', videoRefId), { progress: 30, progressDetail: 'جاري توليد الفيديو (Veo 3.1)...' });
 
-      let operation = await ai.models.generateVideos({
-        model: 'veo-3.1-fast-generate-preview',
-        prompt: video.veoPrompt,
-        config: {
-          numberOfVideos: 1,
-          resolution: '1080p',
-          aspectRatio: '9:16'
+      let operation = null;
+
+      operation = await retryWithBackoff(async (ai) => {
+        let op = await ai.models.generateVideos({
+          model: 'veo-3.1-fast-generate-preview',
+          prompt: video.veoPrompt,
+          config: {
+            numberOfVideos: 1,
+            resolution: '1080p',
+            aspectRatio: '9:16'
+          }
+        });
+
+        // Simulate progress while generating
+        let simulatedProgress = 30;
+        while (!op.done) {
+          await new Promise(resolve => setTimeout(resolve, 10000));
+          simulatedProgress = Math.min(simulatedProgress + 5, 75);
+          setQueue(prev => prev.map(v => v.id === video.id ? { ...v, progress: simulatedProgress } : v));
+          op = await ai.operations.getVideosOperation({ operation: op });
         }
+        return op;
       });
 
-      // Simulate progress while generating
-      let simulatedProgress = 30;
-      while (!operation.done) {
-        await new Promise(resolve => setTimeout(resolve, 10000));
-        simulatedProgress = Math.min(simulatedProgress + 5, 75);
-        setQueue(prev => prev.map(v => v.id === video.id ? { ...v, progress: simulatedProgress } : v));
-        operation = await ai.operations.getVideosOperation({operation: operation});
-      }
-
-      const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+      let downloadLink = operation?.response?.generatedVideos?.[0]?.video?.uri;
       
       if (!downloadLink) {
         throw new Error("فشل في الحصول على رابط الفيديو المولد");
@@ -519,11 +540,14 @@ export function PublishView() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          videoId: videoRefId,
           videoUrl: downloadLink,
           title: video.title,
-          description: video.overlayText,
+          description: video.description || `${video.overlayText}\n\n#Shorts`,
+          overlayText: video.overlayText,
           scheduledTime: video.rawTimestamp,
-          channelId: video.channelId
+          channelId: video.channelId,
+          apiKey: getCurrentApiKey()
         })
       });
 
@@ -552,6 +576,52 @@ export function PublishView() {
           console.error("Failed to update error status in Firebase", e);
         }
       }
+    }
+  };
+
+  const handlePublishVideo = async (video: ScheduledVideo, channelId: string, publishNow: boolean = false) => {
+    try {
+      setQueue(prev => prev.map(v => v.id === video.id ? { ...v, status: 'generating', progress: 80, progressDetail: 'جاري النشر على يوتيوب...' } : v));
+      
+      const res = await fetch('/api/youtube/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          videoId: video.firebaseId || video.id,
+          videoUrl: video.videoUrl,
+          title: video.title,
+          description: video.description || `${video.overlayText}\n\n#Shorts`,
+          overlayText: video.overlayText,
+          scheduledTime: scheduledTime,
+          channelId: channelId,
+          publishNow: publishNow,
+          apiKey: getCurrentApiKey()
+        })
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "فشل في النشر على يوتيوب");
+      }
+
+      const responseData = await res.json();
+      
+      if (responseData.videoId !== (video.firebaseId || video.id)) {
+        throw new Error("فشل التحقق النهائي: الفيديو المرفوع لا يتطابق مع الفيديو المطلوب");
+      }
+
+      const youtubeUrl = responseData.youtubeUrl || null;
+      const channelName = channels.find(c => c.id === channelId)?.title || 'القناة';
+
+      setQueue(prev => prev.map(v => v.id === video.id ? { ...v, status: 'published', progress: 100, progressDetail: 'تم النشر بنجاح', youtubeUrl } : v));
+      await updateDoc(doc(db, 'scheduledVideos', video.firebaseId!), { status: 'published', progress: 100, progressDetail: 'تم النشر بنجاح', youtubeUrl });
+      
+      setSuccessMessage(`تم نشر الفيديو بنجاح على قناة ${channelName}! الرابط: ${youtubeUrl}`);
+      setTimeout(() => setSuccessMessage(null), 10000);
+    } catch (err: any) {
+      console.error(`Failed to publish video ${video.id}:`, err);
+      setQueue(prev => prev.map(v => v.id === video.id ? { ...v, status: 'error', progress: 0, progressDetail: err.message || 'حدث خطأ أثناء النشر' } : v));
+      setError(err.message || 'حدث خطأ أثناء النشر');
     }
   };
 
@@ -1037,6 +1107,18 @@ export function PublishView() {
 
                             {/* Actions */}
                             <div className="col-span-1 flex items-center justify-end gap-1.5">
+                              {video.videoUrl && video.status !== 'published' && video.status !== 'scheduled' && (
+                                <button 
+                                  onClick={() => {
+                                    setVideoToPublish(video);
+                                    setIsChannelSelectionOpen(true);
+                                  }}
+                                  className="p-2.5 text-zinc-500 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-xl transition-all border border-transparent hover:border-emerald-500/20"
+                                  title="نشر الفيديو"
+                                >
+                                  <Send className="w-4 h-4" />
+                                </button>
+                              )}
                               {video.youtubeUrl && (
                                 <a 
                                   href={video.youtubeUrl}
@@ -1270,6 +1352,63 @@ export function PublishView() {
         <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 px-8 py-5 rounded-3xl flex items-center gap-4 animate-in slide-in-from-bottom-4 duration-500">
           <CheckCircle2 className="w-6 h-6 shrink-0" />
           <p className="text-sm font-medium">{successMessage}</p>
+        </div>
+      )}
+
+      {/* Channel Selection Dialog */}
+      {isChannelSelectionOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full max-w-md space-y-6">
+            <h3 className="text-xl font-bold text-white">اختر القناة للنشر</h3>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 bg-zinc-950 border border-zinc-800 rounded-xl">
+                <span className="text-sm font-bold text-white">نشر الآن</span>
+                <button 
+                  onClick={() => setPublishNow(!publishNow)}
+                  className={`w-12 h-6 rounded-full transition-all relative ${publishNow ? 'bg-emerald-600' : 'bg-zinc-800'}`}
+                >
+                  <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${publishNow ? 'right-1' : 'right-7'}`} />
+                </button>
+              </div>
+              
+              {!publishNow && (
+                <div className="space-y-2">
+                  <label className="text-xs text-zinc-400 font-bold">وقت النشر</label>
+                  <input 
+                    type="datetime-local"
+                    value={scheduledTime}
+                    onChange={(e) => setScheduledTime(e.target.value)}
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-3 text-white text-sm"
+                  />
+                </div>
+              )}
+              
+              <div className="space-y-2">
+                <label className="text-xs text-zinc-400 font-bold">القناة</label>
+                <div className="space-y-2">
+                  {channels.map(channel => (
+                    <button
+                      key={channel.id}
+                      onClick={() => {
+                        handlePublishVideo(videoToPublish!, channel.id, publishNow);
+                        setIsChannelSelectionOpen(false);
+                      }}
+                      className="w-full flex items-center gap-3 p-3 bg-zinc-950 hover:bg-zinc-800 rounded-xl border border-zinc-800 transition-all"
+                    >
+                      <img src={channel.thumbnail} alt="" className="w-10 h-10 rounded-full" />
+                      <span className="text-white font-bold">{channel.title}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <button 
+              onClick={() => setIsChannelSelectionOpen(false)}
+              className="w-full py-3 bg-zinc-800 text-white rounded-xl font-bold"
+            >
+              إلغاء
+            </button>
+          </div>
         </div>
       )}
     </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Key, CheckCircle2, XCircle, Loader2, RefreshCw, ShieldCheck, AlertTriangle } from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
+import { Key, CheckCircle2, XCircle, Loader2, RefreshCw, ShieldCheck, AlertTriangle, List, Shield } from 'lucide-react';
+import { retryWithBackoff, API_KEYS } from '../../lib/ai-client';
 
 export function KeysView() {
   const [hasKey, setHasKey] = useState<boolean | null>(null);
@@ -54,20 +54,11 @@ export function KeysView() {
     setTestResult({ status: null, message: '' });
 
     try {
-      // @ts-ignore
-      const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
-      
-      if (!apiKey) {
-        throw new Error("لم يتم العثور على مفتاح API. يرجى اختيار مفتاح أولاً.");
-      }
-
-      const ai = new GoogleGenAI({ apiKey });
-
       // Test with a fast model
-      const response = await ai.models.generateContent({
+      const response = await retryWithBackoff((ai) => ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: 'Reply with "OK" if you receive this.',
-      });
+      }));
 
       if (response.text) {
         setTestResult({ 
@@ -139,6 +130,36 @@ export function KeysView() {
               <span>مفتاح API ضروري لتوليد الفيديوهات عبر Veo 3.1 والنصوص عبر Gemini. يتم تخزين المفتاح بشكل آمن في متصفحك.</span>
             </p>
           </div>
+        </div>
+
+        {/* Rotated Keys List */}
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+          <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+            <List className="w-5 h-5 text-zinc-400" />
+            قائمة التدوير التلقائي (5 مفاتيح)
+          </h3>
+          
+          <div className="space-y-2 max-h-[200px] overflow-y-auto pr-2 custom-scrollbar">
+            {API_KEYS.map((key, index) => (
+              <div key={index} className="flex items-center justify-between p-3 bg-zinc-950 rounded-lg border border-zinc-800/50">
+                <div className="flex items-center gap-3 overflow-hidden">
+                  <div className="w-6 h-6 rounded-full bg-violet-500/10 text-violet-400 flex items-center justify-center text-[10px] font-bold shrink-0">
+                    {index + 1}
+                  </div>
+                  <code className="text-[10px] text-zinc-400 truncate font-mono">
+                    {key.substring(0, 8)}...{key.substring(key.length - 4)}
+                  </code>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[10px] px-2 py-0.5 bg-zinc-800 text-zinc-500 rounded uppercase">Active</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          <p className="text-[10px] text-zinc-500 mt-4 italic">
+            * يتم التبديل بين هذه المفاتيح تلقائياً عند حدوث خطأ 429 أو رفض المفتاح لضمان استمرارية العمل.
+          </p>
         </div>
 
         {/* Test Card */}

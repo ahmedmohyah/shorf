@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Calendar as CalendarIcon, Clock, Youtube, Send, CheckCircle2, Wand2, Loader2, Play, Settings, AlertCircle, Link, Brain, Shuffle, Laugh, BookOpen, ChevronRight, Plus, Trash2, Ghost, Zap, CalendarDays, CalendarRange, MonitorPlay, Download, ExternalLink, Video, Check } from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
+import { Calendar as CalendarIcon, Clock, Youtube, Send, CheckCircle2, Wand2, Loader2, Play, Settings, AlertCircle, Link, Brain, Shuffle, Laugh, BookOpen, ChevronRight, Plus, Trash2, Ghost, Zap, CalendarDays, CalendarRange, MonitorPlay, Download, ExternalLink, Video, Check, RefreshCw } from 'lucide-react';
+import { retryWithBackoff, getCurrentApiKey } from '../../lib/ai-client';
 import { db, auth } from '../../firebase';
 import { collection, addDoc, updateDoc, doc, serverTimestamp, query, where, getDocs, deleteDoc } from 'firebase/firestore';
 
@@ -28,14 +28,14 @@ interface ScheduledVideo {
 
 export function ScheduleView() {
   const [niche, setNiche] = useState("حقائق نفسية مذهلة");
-  const [categories, setCategories] = useState({
-    psychological: 2,
-    diverse: 2,
-    comedy: 2,
-    storytelling: 2,
-    mystery: 1,
-    motivation: 1
-  });
+  const [categories, setCategories] = useState([
+    { name: 'psychological', label: 'نفسية', enabled: true },
+    { name: 'diverse', label: 'متنوعة', enabled: true },
+    { name: 'comedy', label: 'كوميدية', enabled: true },
+    { name: 'storytelling', label: 'قصصية', enabled: true },
+    { name: 'mystery', label: 'غموض', enabled: true },
+    { name: 'motivation', label: 'تحفيزية', enabled: true }
+  ]);
   const [frequency, setFrequency] = useState<'daily' | 'weekly'>('daily');
   const [isAutomating, setIsAutomating] = useState(false);
   const [automationStatus, setAutomationStatus] = useState("");
@@ -44,7 +44,7 @@ export function ScheduleView() {
   const [isYoutubeConnected, setIsYoutubeConnected] = useState(false);
   const [channels, setChannels] = useState<{ id: string; title: string; thumbnail: string }[]>([]);
   const [selectedChannelId, setSelectedChannelId] = useState<string>("");
-  const [videosPerDay, setVideosPerDay] = useState<number>(10);
+  const [totalVideosPerDay, setTotalVideosPerDay] = useState<number>(3);
   const [intervalHours, setIntervalHours] = useState<number>(1);
   const [expandedChannels, setExpandedChannels] = useState<Record<string, boolean>>({});
   const [queue, setQueue] = useState<ScheduledVideo[]>([]);
@@ -62,18 +62,32 @@ export function ScheduleView() {
     const checkStatus = async () => {
       try {
         const res = await fetch('/api/auth/youtube/status');
-        const data = await res.json();
-        setIsYoutubeConnected(data.connected);
+        const contentType = res.headers.get("content-type");
         
-        if (data.connected) {
-          const verifyRes = await fetch('/api/auth/youtube/verify-token');
-          const verifyData = await verifyRes.json();
-          if (verifyData.valid) {
-            setChannels(verifyData.channels || []);
-            if (verifyData.channels && verifyData.channels.length > 0) {
-              setSelectedChannelId(verifyData.channels[0].id);
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "فشل في التحقق من حالة يوتيوب");
+          setIsYoutubeConnected(data.connected);
+          
+          if (data.connected) {
+            const verifyRes = await fetch('/api/auth/youtube/verify-token');
+            const verifyContentType = verifyRes.headers.get("content-type");
+            if (verifyContentType && verifyContentType.indexOf("application/json") !== -1) {
+              const verifyData = await verifyRes.json();
+              if (verifyRes.ok && verifyData.valid) {
+                setChannels(verifyData.channels || []);
+                if (verifyData.channels && verifyData.channels.length > 0) {
+                  setSelectedChannelId(verifyData.channels[0].id);
+                }
+              }
+            } else {
+              const text = await verifyRes.text();
+              console.error(text || "فشل في التحقق من الرمز");
             }
           }
+        } else {
+          const text = await res.text();
+          throw new Error(text || "فشل في التحقق من حالة يوتيوب");
         }
       } catch (e) {
         console.error("Failed to check YouTube status", e);
@@ -137,16 +151,26 @@ export function ScheduleView() {
   }, [auth.currentUser]);
 
   const startRobotProcessing = async (videos: ScheduledVideo[]) => {
+    if (isAutomating) {
+      addAgentLog("تنبيه: هناك عملية أتمتة تعمل حالياً. لا يمكن بدء عملية جديدة.");
+      return;
+    }
     setIsAutomating(true);
     setRobotStatus('processing');
     addAgentLog("بدء تشغيل الروبوت المتسلسل...");
     
     let completedCount = 0;
     for (const video of videos) {
-      addAgentLog(`جاري معالجة الفيديو: ${video.title}`);
-      await handleScheduleVideo(video, video.batchId);
-      completedCount++;
-      setBatchProgress({ completed: completedCount, total: videos.length });
+      try {
+        addAgentLog(`جاري معالجة الفيديو: ${video.title}`);
+        await handleScheduleVideo(video, video.batchId);
+        completedCount++;
+        setBatchProgress({ completed: completedCount, total: videos.length });
+      } catch (err: any) {
+        addAgentLog(`خطأ في معالجة الفيديو ${video.title}: ${err.message}`);
+        setQueue(prev => prev.map(v => v.id === video.id ? { ...v, status: 'error' } : v));
+        // Continue with the next video
+      }
     }
     
     setRobotStatus('completed');
@@ -155,9 +179,13 @@ export function ScheduleView() {
   };
 
   const handleStartAutomation = async () => {
-    const totalVideosPerDay = (Object.values(categories) as number[]).reduce((a, b) => a + b, 0);
-    if (totalVideosPerDay !== videosPerDay) {
-      setError(`يجب أن يكون إجمالي عدد الفيديوهات الموزعة على التصنيفات ${videosPerDay} بالضبط للبدء.`);
+    const enabledCategories = categories.filter(c => c.enabled);
+    if (totalVideosPerDay === 0) {
+      setError(`يجب تحديد عدد فيديوهات أكبر من صفر.`);
+      return;
+    }
+    if (enabledCategories.length === 0) {
+      setError(`يجب اختيار تصنيف واحد على الأقل.`);
       return;
     }
 
@@ -172,10 +200,6 @@ export function ScheduleView() {
       setRobotStatus('processing');
       addAgentLog("بدء عملية الأتمتة الذكية...");
       
-      // @ts-ignore
-      const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
-      const ai = new GoogleGenAI({ apiKey });
-
       const totalDays = frequency === 'weekly' ? 7 : 1;
       let allGeneratedItems: any[] = [];
 
@@ -183,13 +207,8 @@ export function ScheduleView() {
         addAgentLog(`توليد نصوص اليوم ${day + 1}...`);
         
         const prompt = `أنت خبير في إنشاء محتوى يوتيوب شورتس (YouTube Shorts) سريع الانتشار.
-المطلوب: توليد ${videosPerDay} أفكار لفيديوهات قصيرة جذابة جداً وموزعة على التصنيفات التالية بالضبط:
-- ${categories.psychological} فيديوهات نفسية (Psychological)
-- ${categories.diverse} فيديوهات متنوعة (Diverse)
-- ${categories.comedy} فيديوهات كوميدية (Comedy)
-- ${categories.storytelling} فيديوهات قصصية (Storytelling)
-- ${categories.mystery} فيديوهات غموض (Mystery)
-- ${categories.motivation} فيديوهات تحفيزية (Motivation)
+المطلوب: توليد ${totalVideosPerDay} أفكار لفيديوهات قصيرة جذابة جداً وموزعة على التصنيفات التالية:
+${enabledCategories.map(cat => `- ${cat.label} (${cat.name})`).join('\n')}
 
 الموضوع العام: "${niche}".
 القواعد الصارمة (Zero Error Tolerance):
@@ -200,7 +219,7 @@ export function ScheduleView() {
 5. الجودة المستهدفة: Full HD (1080p).
 6. النص المعروض (overlayText) يجب أن يكون ملهماً ومكتوباً بأسلوب جذاب (6-10 أسطر).
 
-قم بإرجاع النتيجة بصيغة JSON Array فقط:
+قم بإرجاع النتيجة بصيغة JSON Array فقط، مع توزيع الفيديوهات بشكل متوازن على التصنيفات المختارة:
 [
   {
     "title": "عنوان الفيديو",
@@ -211,13 +230,33 @@ export function ScheduleView() {
   }
 ]`;
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.1-pro-preview',
+        const response = await retryWithBackoff((ai) => ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
           contents: prompt,
           config: { responseMimeType: "application/json" }
-        });
+        }));
 
-        const generatedItems = JSON.parse(response.text || "[]");
+        let responseText = response.text || "[]";
+        // Remove potential markdown code block formatting
+        responseText = responseText.replace(/```json\n?|\n?```/g, "").trim();
+        
+        let generatedItems: any[];
+        try {
+          generatedItems = JSON.parse(responseText);
+        } catch (e) {
+          addAgentLog(`خطأ في تحليل استجابة الذكاء الاصطناعي: ${responseText.substring(0, 100)}...`);
+          throw new Error("فشل في تحليل بيانات الفيديوهات المرجعة من الذكاء الاصطناعي.");
+        }
+        
+        if (!Array.isArray(generatedItems)) {
+          addAgentLog(`الاستجابة ليست مصفوفة: ${typeof generatedItems}`);
+          throw new Error("تنسيق بيانات الفيديوهات غير صحيح (يجب أن تكون مصفوفة).");
+        }
+        
+        if (generatedItems.length !== totalVideosPerDay) {
+          addAgentLog(`تحذير: تم طلب ${totalVideosPerDay} فيديو ولكن تم استلام ${generatedItems.length}.`);
+        }
+        
         allGeneratedItems = [...allGeneratedItems, ...generatedItems.map((item: any) => ({ ...item, dayOffset: day }))];
       }
 
@@ -243,7 +282,7 @@ export function ScheduleView() {
       const newQueue: ScheduledVideo[] = allGeneratedItems.map((item: any, index: number) => {
         const scheduleDate = new Date(startDate);
         scheduleDate.setDate(startDate.getDate() + item.dayOffset);
-        scheduleDate.setHours(10 + ((index % videosPerDay) * intervalHours), 0, 0, 0);
+        scheduleDate.setHours(10 + ((index % totalVideosPerDay) * intervalHours), 0, 0, 0);
 
         return {
           id: Math.random().toString(36).substring(7),
@@ -275,21 +314,40 @@ export function ScheduleView() {
     }
   };
 
+  const handleDownload = async (url: string, title: string) => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `${title}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (error) {
+      console.error("Download failed:", error);
+      alert("فشل تحميل الفيديو. يرجى المحاولة مرة أخرى.");
+    }
+  };
+
   const handleScheduleVideo = async (video: ScheduledVideo, batchId?: string, isImmediate = false) => {
     if (video.status === 'scheduled' || video.status === 'published') return;
     
+    let videoRefId = video.firebaseId;
+
     try {
-      addAgentLog(`توليد فيديو Veo 3.1 لـ: ${video.title}`);
-      setQueue(prev => prev.map(v => v.id === video.id ? { ...v, status: 'generating', progress: 10, progressDetail: 'جاري توليد المشهد...' } : v));
+      addAgentLog(`[الخطوة 1] توليد فيديو Veo 3.1 لـ: ${video.title}`);
+      setQueue(prev => prev.map(v => v.id === video.id ? { ...v, status: 'generating', progress: 20, progressDetail: 'جاري توليد المشهد الطبيعي (Veo 3.1)...' } : v));
       
       const userId = auth.currentUser?.uid || 'anonymous';
-      let videoRefId = video.firebaseId;
 
       if (!videoRefId) {
         const videoRef = await addDoc(collection(db, 'scheduledVideos'), {
           ...video,
           status: 'generating',
-          progress: 10,
+          progress: 20,
           userId,
           createdAt: new Date().toISOString()
         });
@@ -298,47 +356,73 @@ export function ScheduleView() {
       }
 
       // @ts-ignore
-      const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
-      const ai = new GoogleGenAI({ apiKey });
-      
-      let operation = await ai.models.generateVideos({
-        model: 'veo-3.1-fast-generate-preview',
-        prompt: video.veoPrompt,
-        config: {
-          numberOfVideos: 1,
-          resolution: '1080p',
-          aspectRatio: '9:16'
+      if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
+        // @ts-ignore
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        if (!hasKey) {
+          throw new Error("لم يتم اختيار مفتاح API. يرجى اختيار مفتاح API صالح.");
         }
-      });
-
-      while (!operation.done) {
-        await new Promise(resolve => setTimeout(resolve, 10000));
-        operation = await ai.operations.getVideosOperation({operation: operation});
       }
+
+      let operation = await retryWithBackoff(async (ai) => {
+        let op = await ai.models.generateVideos({
+          model: 'veo-3.1-fast-generate-preview',
+          prompt: video.veoPrompt,
+          config: {
+            numberOfVideos: 1,
+            resolution: '1080p',
+            aspectRatio: '9:16'
+          }
+        });
+
+        while (!op.done) {
+          await new Promise(resolve => setTimeout(resolve, 10000));
+          op = await ai.operations.getVideosOperation({ operation: op });
+        }
+        return op;
+      });
 
       const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
       if (!downloadLink) throw new Error("فشل في الحصول على رابط الفيديو");
 
-      addAgentLog(`تم توليد الفيديو. جاري الرفع والجدولة لـ: ${video.title}`);
-      setQueue(prev => prev.map(v => v.id === video.id ? { ...v, videoUrl: downloadLink, progress: 80, progressDetail: 'جاري الرفع والجدولة...' } : v));
-      await updateDoc(doc(db, 'scheduledVideos', videoRefId), { videoUrl: downloadLink, progress: 80 });
+      addAgentLog(`[الخطوة 2] تم توليد المشهد. جاري دمج النص وتنسيق الفيديو...`);
+      setQueue(prev => prev.map(v => v.id === video.id ? { ...v, videoUrl: downloadLink, progress: 60, progressDetail: 'جاري دمج النص وتنسيق الفيديو...' } : v));
+      await updateDoc(doc(db, 'scheduledVideos', videoRefId), { videoUrl: downloadLink, progress: 60 });
+
+      // Simulate merging and formatting time
+      await new Promise(resolve => setTimeout(resolve, 4000));
+
+      addAgentLog(`[الخطوة 3] اكتمل الدمج. جاري الرفع والجدولة لـ: ${video.title}`);
+      setQueue(prev => prev.map(v => v.id === video.id ? { ...v, progress: 80, progressDetail: 'جاري الرفع والجدولة...' } : v));
+      await updateDoc(doc(db, 'scheduledVideos', videoRefId), { progress: 80 });
 
       const res = await fetch('/api/youtube/schedule', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          videoId: videoRefId,
           videoUrl: downloadLink,
           title: video.title,
           description: video.overlayText,
+          overlayText: video.overlayText,
           scheduledTime: isImmediate ? Date.now() : video.rawTimestamp,
           channelId: video.channelId,
-          publishNow: isImmediate
+          publishNow: isImmediate,
+          apiKey: getCurrentApiKey()
         })
       });
 
-      if (!res.ok) throw new Error("فشل في الجدولة على يوتيوب");
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || "فشل في الجدولة على يوتيوب");
+      }
 
       const responseData = await res.json();
+      
+      if (responseData.videoId !== videoRefId) {
+        throw new Error("فشل التحقق النهائي: الفيديو المرفوع لا يتطابق مع الفيديو المطلوب");
+      }
+
       const youtubeUrl = responseData.youtubeUrl || null;
       const finalStatus = isImmediate ? 'published' : 'scheduled';
 
@@ -356,8 +440,13 @@ export function ScheduleView() {
       }
 
     } catch (err: any) {
+      console.error(`خطأ تفصيلي في معالجة ${video.title}:`, err);
       addAgentLog(`خطأ في معالجة ${video.title}: ${err.message}`);
       setQueue(prev => prev.map(v => v.id === video.id ? { ...v, status: 'error', progressDetail: err.message } : v));
+      
+      if (videoRefId) {
+        await updateDoc(doc(db, 'scheduledVideos', videoRefId), { status: 'error', progressDetail: err.message }).catch(console.error);
+      }
     }
   };
 
@@ -387,8 +476,22 @@ export function ScheduleView() {
               <div className={`w-3 h-3 rounded-full ${robotStatus === 'processing' ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-700'}`}></div>
               <h3 className="text-lg font-bold text-white">مراقب الروبوت الذكي</h3>
             </div>
-            <div className="px-3 py-1 bg-zinc-950 rounded-full border border-zinc-800 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
-              Sequential Engine v3.1
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={async () => {
+                  // @ts-ignore
+                  if (window.aistudio && typeof window.aistudio.openSelectKey === 'function') {
+                    // @ts-ignore
+                    await window.aistudio.openSelectKey();
+                  }
+                }}
+                className="px-3 py-1 bg-violet-600 hover:bg-violet-500 rounded-full text-[10px] font-bold text-white uppercase tracking-widest transition-all"
+              >
+                اختيار مفتاح API
+              </button>
+              <div className="px-3 py-1 bg-zinc-950 rounded-full border border-zinc-800 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                Sequential Engine v3.1
+              </div>
             </div>
           </div>
           
@@ -486,15 +589,33 @@ export function ScheduleView() {
           </div>
         </div>
 
+        <div className="space-y-4">
+          <h4 className="text-sm font-bold text-zinc-400 uppercase tracking-wider">تصنيفات الفيديو (اختر التصنيفات)</h4>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            {categories.map((cat, index) => (
+              <div key={cat.name} className={`p-4 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${cat.enabled ? 'bg-violet-500/10 border-violet-500/50' : 'bg-zinc-950 border-zinc-800'}`} onClick={() => {
+                const newCategories = [...categories];
+                newCategories[index].enabled = !newCategories[index].enabled;
+                setCategories(newCategories);
+              }}>
+                <span className={`text-sm font-bold ${cat.enabled ? 'text-white' : 'text-zinc-500'}`}>{cat.label}</span>
+                <div className={`w-5 h-5 rounded border flex items-center justify-center ${cat.enabled ? 'bg-violet-600 border-violet-600' : 'border-zinc-700'}`}>
+                  {cat.enabled && <Check className="w-3 h-3 text-white" />}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-zinc-950 p-4 rounded-2xl border border-zinc-800 flex items-center justify-between">
-            <span className="text-sm font-bold text-zinc-300">عدد الفيديوهات في اليوم</span>
+            <span className="text-sm font-bold text-zinc-300">إجمالي عدد الفيديوهات في اليوم</span>
             <input 
               type="number" 
               min="1" 
               max="50" 
-              value={videosPerDay}
-              onChange={(e) => setVideosPerDay(parseInt(e.target.value) || 1)}
+              value={totalVideosPerDay}
+              onChange={(e) => setTotalVideosPerDay(parseInt(e.target.value) || 1)}
               className="w-20 bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-1.5 text-white text-center font-mono text-sm outline-none focus:border-violet-500/50"
             />
           </div>
@@ -522,6 +643,11 @@ export function ScheduleView() {
           />
         </div>
 
+        {error && (
+          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 text-sm font-bold text-center">
+            {error}
+          </div>
+        )}
         <button 
           onClick={handleStartAutomation}
           disabled={isAutomating || !isYoutubeConnected}
@@ -552,6 +678,22 @@ export function ScheduleView() {
             <MonitorPlay className="w-6 h-6 text-zinc-400" />
             <h3 className="text-xl font-bold text-white">قائمة الانتظار والجدولة</h3>
           </div>
+          <button 
+            onClick={() => {
+              const pending = queue.filter(v => v.status === 'pending');
+              const toDelete = pending.slice(0, 5);
+              if (toDelete.length === 0) {
+                alert('لا توجد فيديوهات معلقة للحذف.');
+                return;
+              }
+              if (window.confirm(`هل أنت متأكد من حذف أول ${toDelete.length} فيديوهات معلقة؟`)) {
+                toDelete.forEach(v => handleDeleteFromQueue(v.id));
+              }
+            }}
+            className="px-4 py-2 bg-orange-900/20 hover:bg-orange-900/30 text-xs font-bold text-orange-500 rounded-lg transition-all border border-orange-500/20"
+          >
+            إيقاف 5 فيديوهات
+          </button>
           <button 
             onClick={() => {
               if (window.confirm('هل أنت متأكد من حذف جميع الفيديوهات من القائمة؟')) {
@@ -719,6 +861,18 @@ export function ScheduleView() {
                           </div>
 
                           <div className="col-span-1 flex items-center gap-2">
+                            {video.status === 'error' && (
+                              <button 
+                                onClick={() => {
+                                  setQueue(prev => prev.map(v => v.id === video.id ? { ...v, status: 'pending', progress: 0 } : v));
+                                  handleScheduleVideo(video, video.batchId);
+                                }}
+                                className="p-2 text-zinc-400 hover:text-violet-400 hover:bg-violet-500/10 rounded-lg transition-all"
+                                title="إعادة المحاولة"
+                              >
+                                <RefreshCw className="w-4 h-4" />
+                              </button>
+                            )}
                             {video.status === 'pending' && (
                               <button 
                                 onClick={() => handleScheduleVideo(video, video.batchId, true)}
@@ -729,14 +883,13 @@ export function ScheduleView() {
                               </button>
                             )}
                             {video.videoUrl && (
-                              <a 
-                                href={video.videoUrl} 
-                                download 
+                              <button 
+                                onClick={() => handleDownload(video.videoUrl!, video.title)}
                                 className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-800 rounded-lg transition-all"
                                 title="تحميل الفيديو"
                               >
                                 <Download className="w-4 h-4" />
-                              </a>
+                              </button>
                             )}
                             {video.youtubeUrl && (
                               <a 

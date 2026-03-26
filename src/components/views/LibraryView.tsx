@@ -1,13 +1,34 @@
 import { Play, Square, Download, Send, MoreVertical, Music, Sparkles, Video, Image as ImageIcon, Heart, Youtube } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, doc, updateDoc } from 'firebase/firestore';
 import { db, auth } from '../../firebase';
+import { getCurrentApiKey } from '../../lib/ai-client';
 
 export function LibraryView() {
   const [playingId, setPlayingId] = useState<number | string | null>(null);
   const [firebaseVideos, setFirebaseVideos] = useState<any[]>([]);
+  const [channels, setChannels] = useState<{ id: string; title: string; thumbnail: string }[]>([]);
+  const [isChannelSelectionOpen, setIsChannelSelectionOpen] = useState(false);
+  const [videoToPublish, setVideoToPublish] = useState<any | null>(null);
+  const [publishingStatus, setPublishingStatus] = useState<'idle' | 'downloading' | 'uploading' | 'success' | 'error'>('idle');
+  const [progress, setProgress] = useState(0);
   const videoRefs = useRef<{ [key: string]: HTMLVideoElement | null }>({});
   const audioRefs = useRef<{ [key: string]: HTMLAudioElement | null }>({});
+
+  useEffect(() => {
+    const fetchChannels = async () => {
+      try {
+        const res = await fetch('/api/auth/youtube/status');
+        const data = await res.json();
+        if (data.channels) {
+          setChannels(data.channels);
+        }
+      } catch (error) {
+        console.error("Failed to fetch channels:", error);
+      }
+    };
+    fetchChannels();
+  }, []);
 
   useEffect(() => {
     const fetchFirebaseVideos = async () => {
@@ -16,7 +37,6 @@ export function LibraryView() {
         const q = query(
           collection(db, 'scheduledVideos'),
           where('userId', '==', auth.currentUser.uid),
-          where('status', '==', 'published'),
           orderBy('createdAt', 'desc')
         );
         const snapshot = await getDocs(q);
@@ -30,7 +50,10 @@ export function LibraryView() {
             date: data.scheduledDate,
             music: 'أصوات طبيعية',
             videoUrl: data.videoUrl,
-            youtubeUrl: data.youtubeUrl, // Assuming we save this
+            youtubeUrl: data.youtubeUrl,
+            publishStatus: data.publishStatus,
+            publishedAt: data.publishedAt,
+            channelName: data.channelName,
             title: data.title,
             overlayText: data.overlayText,
             poster: data.thumbnail,
@@ -106,6 +129,144 @@ export function LibraryView() {
     }
   };
 
+  const handleDownload = async (url: string, title: string, overlayText?: string, audioUrl?: string) => {
+    try {
+      // Use the server-side proxy to download the video and bypass CORS
+      let proxyUrl = `/api/proxy-download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(title || 'video')}.mp4&apiKey=${getCurrentApiKey()}`;
+      if (overlayText) {
+        proxyUrl += `&overlayText=${encodeURIComponent(overlayText)}`;
+      }
+      if (audioUrl) {
+        proxyUrl += `&audioUrl=${encodeURIComponent(audioUrl)}`;
+      }
+      window.location.href = proxyUrl;
+    } catch (error) {
+      console.error("Download failed:", error);
+      alert("فشل تحميل الفيديو. يرجى المحاولة مرة أخرى.");
+    }
+  };
+
+  const handlePublish = async (video: any, channel: any) => {
+    setPublishingStatus('downloading');
+    setProgress(0);
+    
+    try {
+      // 1. Pre-upload verification (Client side)
+      if (!video.videoUrl) throw new Error("رابط الفيديو مفقود");
+      if (!video.id) throw new Error("معرف الفيديو مفقود");
+      if (!channel || !channel.id) throw new Error("القناة المستهدفة مفقودة");
+      
+      // Update status to pending in Firestore if it's a firebase video
+      if (typeof video.id === 'string') {
+        const docRef = doc(db, 'scheduledVideos', video.id);
+        await updateDoc(docRef, {
+          publishStatus: 'pending',
+          channelId: channel.id,
+          channelName: channel.title,
+          updatedAt: new Date().toISOString()
+        });
+        
+        // Update local state
+        setFirebaseVideos(prev => prev.map(v => v.id === video.id ? {
+          ...v,
+          publishStatus: 'pending',
+          channelName: channel.title
+        } : v));
+      }
+
+      // Simulate download progress
+      for (let i = 0; i <= 50; i += 10) {
+        setProgress(i);
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      
+      setPublishingStatus('uploading');
+      
+      // Simulate upload progress
+      for (let i = 50; i <= 90; i += 10) {
+        setProgress(i);
+        await new Promise(resolve => setTimeout(resolve, 300));
+      }
+
+      const res = await fetch('/api/youtube/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          videoId: video.id,
+          videoUrl: video.videoUrl,
+          title: video.title || video.category,
+          description: video.description || video.overlayText,
+          overlayText: video.overlayText,
+          publishNow: true,
+          channelId: channel.id,
+          apiKey: getCurrentApiKey()
+        }),
+      });
+      const data = await res.json();
+      
+      // 3. Post-upload verification
+      if (data.success) {
+        if (data.videoId !== video.id) {
+           throw new Error("فشل التحقق النهائي: الفيديو المرفوع لا يتطابق مع الفيديو المطلوب");
+        }
+        
+        setPublishingStatus('success');
+        setProgress(100);
+        
+        // Update status to published in Firestore
+        if (typeof video.id === 'string') {
+          const docRef = doc(db, 'scheduledVideos', video.id);
+          await updateDoc(docRef, {
+            publishStatus: 'published',
+            youtubeUrl: data.youtubeUrl,
+            publishedAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          });
+          
+          // Update local state
+          setFirebaseVideos(prev => prev.map(v => v.id === video.id ? {
+            ...v,
+            publishStatus: 'published',
+            youtubeUrl: data.youtubeUrl,
+            publishedAt: new Date().toISOString()
+          } : v));
+        } else {
+           // For hardcoded videos, update local state (if we had a state for them, but we don't, so we just alert)
+           // In a real app, hardcoded videos wouldn't be published like this, or they'd be saved to DB first.
+        }
+        
+        alert(data.message);
+      } else {
+        throw new Error(data.error);
+      }
+    } catch (error: any) {
+      setPublishingStatus('error');
+      console.error("Publish failed:", error);
+      
+      // Update status to failed in Firestore
+      if (typeof video.id === 'string') {
+        const docRef = doc(db, 'scheduledVideos', video.id);
+        await updateDoc(docRef, {
+          publishStatus: 'failed',
+          publishError: error.message,
+          updatedAt: new Date().toISOString()
+        });
+        
+        setFirebaseVideos(prev => prev.map(v => v.id === video.id ? {
+          ...v,
+          publishStatus: 'failed'
+        } : v));
+      }
+      
+      alert("فشل نشر الفيديو: " + error.message);
+    } finally {
+      setTimeout(() => {
+        setPublishingStatus('idle');
+        setProgress(0);
+      }, 3000);
+    }
+  };
+
   const videos = [
     {
       id: 26,
@@ -113,10 +274,11 @@ export function LibraryView() {
       category: 'مشاهد حية (Veo 3.1 Native Audio)',
       duration: '00:08',
       date: 'الآن',
-      music: 'الصوت الأصلي للمشهد (ضحكات ولعب)',
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-two-little-girls-playing-with-a-kite-in-a-park-34595-large.mp4',
+      music: 'أصوات الطبيعة (أمواج وطيور)',
+      videoUrl: 'https://vjs.zencdn.net/v/oceans.mp4',
       audioUrl: 'https://assets.mixkit.co/active_storage/sfx/299/299-preview.mp3',
-      poster: 'https://picsum.photos/seed/kidsplaying/400/800',
+      poster: 'https://picsum.photos/seed/oceanwaves/400/800',
+      overlayText: 'سحر المحيط 🌊\n\nطيور النورس تحلق بحرية،\nفوق أمواج المحيط الهادرة،\nزرقة المياه تعانق السماء،\nفي مشهد يبعث على السكينة،\nصوت تلاطم الأمواج يعزف لحناً،\nيأخذنا بعيداً عن ضجيج العالم،\nعظمة الخالق تتجلى في خلقه،\nلحظات تأمل تريح النفس والوجدان.',
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -125,17 +287,17 @@ export function LibraryView() {
           </div>
           <div className={`absolute inset-x-2 bottom-6 flex flex-col items-center justify-center p-2 z-10 transition-opacity duration-1000 ${isPlaying ? 'opacity-100 animate-in fade-in fill-both' : 'opacity-0'}`}>
             <h3 className={`text-white font-black text-3xl mb-4 drop-shadow-[0_0_15px_rgba(255,255,255,0.8)] text-center ${isPlaying ? 'animate-in slide-in-from-top-8 fade-in duration-700 delay-300 fill-both' : ''}`}>
-              براءة الطفولة 🎈
+              سحر المحيط 🌊
             </h3>
             <p className={`text-white font-bold text-lg leading-loose text-center drop-shadow-[0_4px_6px_rgba(0,0,0,1)] ${isPlaying ? 'animate-in slide-in-from-bottom-8 fade-in duration-700 delay-700 fill-both' : ''}`} style={{ fontFamily: "'Cairo', sans-serif", textShadow: '2px 2px 4px #000000' }}>
-              ضحكات بريئة تملأ الأرجاء فرحاً،<br/>
-              أطفال يركضون بحرية تحت أشعة الشمس،<br/>
-              عالم نقي خالٍ من الهموم والأحزان،<br/>
-              حيث اللعب هو اللغة الوحيدة المفهومة،<br/>
-              ابتسامات صادقة تنبع من أعماق القلوب،<br/>
-              خطوات صغيرة تصنع ذكريات كبيرة،<br/>
-              براءة الطفولة تعيد للروح حيويتها،<br/>
-              <span className="text-pink-400">لحظات عفوية تذكرنا بجمال الحياة.</span>
+              طيور النورس تحلق بحرية،<br/>
+              فوق أمواج المحيط الهادرة،<br/>
+              زرقة المياه تعانق السماء،<br/>
+              في مشهد يبعث على السكينة،<br/>
+              صوت تلاطم الأمواج يعزف لحناً،<br/>
+              يأخذنا بعيداً عن ضجيج العالم،<br/>
+              عظمة الخالق تتجلى في خلقه،<br/>
+              <span className="text-blue-400">لحظات تأمل تريح النفس والوجدان.</span>
             </p>
           </div>
         </>
@@ -148,9 +310,10 @@ export function LibraryView() {
       duration: '00:08',
       date: 'الآن',
       music: 'موسيقى هادئة مع صوت الشلال',
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-waterfall-in-forest-2221-large.mp4',
+      videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
       poster: 'https://picsum.photos/seed/waterfall/400/800',
+      overlayText: 'سحر الشلالات 🌊\n\nشلالات الغابة السحرية تتدفق بقوة،\nمياه نقية تروي عطش الأرض الخصبة،\nصوت خرير الماء يعزف أجمل الألحان،\nفي قلب طبيعة عذراء لم تمسسها يد،\nأشجار خضراء تعانق السماء العالية،\nوطيور تغرد بأصوات تبهج الأرواح،\nهنا تجد الهدوء والسكينة المطلقة،\nبعيداً عن صخب الحياة وضجيج المدن.',
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -182,9 +345,10 @@ export function LibraryView() {
       duration: '00:08',
       date: 'الآن',
       music: 'موسيقى إلكترونية حماسية',
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-night-city-traffic-on-a-freeway-4136-large.mp4',
+      videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
       poster: 'https://picsum.photos/seed/citynight/400/800',
+      overlayText: 'أضواء المدينة 🌃\n\nأضواء المدينة الساهرة تنبض بالحياة،\nناطحات سحاب تعانق الغيوم المظلمة،\nشوارع لا تنام تعج بالحركة المستمرة،\nسيارات مسرعة ترسم خطوطاً من النور،\nطاقة حضرية تلهم العقول المبدعة،\nفي عالم حديث مليء بالفرص والتحديات،\nكل زاوية تروي قصة نجاح وطموح،\nسحر الليل يضفي جمالاً لا يقاوم.',
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -216,9 +380,10 @@ export function LibraryView() {
       duration: '00:08',
       date: 'الآن',
       music: 'موسيقى سويسرية هادئة',
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-aerial-view-of-a-mountain-range-in-the-clouds-4464-large.mp4',
+      videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
       poster: 'https://picsum.photos/seed/swiss/400/800',
+      overlayText: 'سويسرا جنة الأرض 🇨🇭\n\nجبال الألب الشاهقة تعانق السحاب،\nوديان خضراء تسرق الأنفاس بجمالها،\nهنا حيث الطبيعة ترسم أبهى لوحاتها،\nأكواخ خشبية دافئة وسط الثلوج والمروج.\nاستنشق هواء الجبال النقي،\nواشعر بالسلام الذي يغمر المكان.\nكل زاوية هنا تخفي سحراً لا يُنسى،\nرحلة إلى قلب الطبيعة العذراء.',
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -252,7 +417,7 @@ export function LibraryView() {
       duration: '00:08',
       date: 'الآن',
       music: 'أصوات الطبيعة وموسيقى ملحمية',
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-aerial-view-of-a-mountain-range-in-the-clouds-4464-large.mp4',
+      videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
       poster: 'https://picsum.photos/seed/mountains/400/800',
       renderContent: (isPlaying: boolean) => (
@@ -324,7 +489,7 @@ export function LibraryView() {
       duration: '00:08',
       date: 'الآن',
       music: 'أصوات الفضاء وموسيقى هادئة',
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-stars-in-space-1610-large.mp4',
+      videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       poster: 'https://picsum.photos/seed/space/400/800',
       renderContent: (isPlaying: boolean) => (
         <>
@@ -359,7 +524,7 @@ export function LibraryView() {
       duration: '00:08',
       date: 'الآن',
       music: 'صوت الشلال وموسيقى هادئة',
-      videoUrl: 'https://cdn.coverr.co/videos/coverr-beautiful-waterfall-in-the-forest-9635/1080p.mp4',
+      videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       poster: 'https://picsum.photos/seed/waterfall5/400/800',
       renderContent: (isPlaying: boolean) => (
         <>
@@ -394,7 +559,7 @@ export function LibraryView() {
       duration: '00:08',
       date: 'الآن',
       music: 'صوت أمواج البحر وموسيقى هادئة',
-      videoUrl: 'https://cdn.coverr.co/videos/coverr-sea-waves-crashing-on-the-beach-4048/1080p.mp4',
+      videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       poster: 'https://picsum.photos/seed/oceanwaves/400/800',
       renderContent: (isPlaying: boolean) => (
         <>
@@ -429,7 +594,7 @@ export function LibraryView() {
       duration: '00:08',
       date: 'الآن',
       music: 'موسيقى محيطية هادئة',
-      videoUrl: 'https://cdn.coverr.co/videos/coverr-sunset-by-the-sea-4447/1080p.mp4',
+      videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       poster: 'https://picsum.photos/seed/sunsetbeach/400/800',
       renderContent: (isPlaying: boolean) => (
         <>
@@ -457,7 +622,7 @@ export function LibraryView() {
       duration: '00:15',
       date: 'الآن',
       music: 'صوت الطبيعة الأصلي (Veo Audio)',
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-aerial-view-of-a-mountain-landscape-4154-large.mp4',
+      videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -580,7 +745,7 @@ export function LibraryView() {
       duration: '00:08',
       date: 'الآن',
       music: 'صوت الشلال الأصلي (Veo Audio)',
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-waterfall-in-forest-2213-large.mp4',
+      videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-b from-black/20 via-black/40 to-black/90 z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -614,7 +779,7 @@ export function LibraryView() {
       duration: '00:08',
       date: 'الآن',
       music: 'صوت المطر الطبيعي الأصلي (Veo Audio)',
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-rain-falling-on-dark-woods-4391-large.mp4',
+      videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-b from-black/20 via-black/60 to-black/90 z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -649,7 +814,7 @@ export function LibraryView() {
       duration: '00:08',
       date: 'الآن',
       music: 'صوت أمواج البحر الأصلي (Veo Audio)',
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-waves-in-the-water-1164-large.mp4',
+      videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-b from-black/30 via-black/50 to-black/90 z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -681,7 +846,9 @@ export function LibraryView() {
       duration: '00:08',
       date: 'الآن',
       music: 'صوت الرياح والأجواء الأصلي (Veo Audio)',
-      videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-clouds-and-blue-sky-2408-large.mp4',
+      videoUrl: 'https://vjs.zencdn.net/v/oceans.mp4',
+      title: 'أغرب صدفة في التاريخ 📜',
+      description: 'مؤسس شركة فيراري (إنزو فيراري) توفي في عام 1988... وفي نفس العام بالضبط 1988! وُلد اللاعب (مسعود أوزيل) الذي يعتبر نسخة طبق الأصل منه في الشكل! هل تؤمن بتناسخ الأرواح؟ 🤯 #Shorts #History #Mystery',
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-amber-900/40 mix-blend-multiply z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -716,6 +883,8 @@ export function LibraryView() {
       music: 'معزوفة بيانو كلاسيكية هادئة',
       bgImage: 'https://picsum.photos/seed/history/400/800',
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+      title: 'حقيقة تاريخية 📜',
+      description: 'أقصر حرب في التاريخ حدثت بين بريطانيا وزنجبار عام 1896م... وانتهت بعد 38 دقيقة فقط! #Shorts #History #Facts',
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-amber-900/50 mix-blend-multiply z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -748,6 +917,8 @@ export function LibraryView() {
       music: 'موسيقى محيطية للتأمل (Ambient)',
       bgImage: 'https://picsum.photos/seed/success/400/800',
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+      title: 'قاعدة النجاح 🚀',
+      description: 'الدافع يجعلك تبدأ، لكن الانضباط هو ما يجعلك تستمر حتى تصل للقمة! #Shorts #Success #Motivation',
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-t from-black via-black/60 to-transparent z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -948,10 +1119,52 @@ export function LibraryView() {
                     <Music className="w-3.5 h-3.5 text-violet-400" />
                     <span className="truncate">{video.music}</span>
                   </div>
+
+                  {/* Publishing Status */}
+                  <div className="mt-4 space-y-2 bg-zinc-950/50 p-3 rounded-xl border border-zinc-800/50">
+                    <div className="text-sm text-zinc-300">
+                      <span className="font-bold text-zinc-500">الوصف:</span> {video.description || video.overlayText || 'بدون وصف'}
+                    </div>
+                    {video.publishStatus && (
+                      <>
+                        <div className="text-sm flex items-center gap-2">
+                          <span className="font-bold text-zinc-500">حالة الرفع:</span> 
+                          <span className={
+                            video.publishStatus === 'published' ? 'text-emerald-400' : 
+                            video.publishStatus === 'failed' ? 'text-red-400' : 'text-amber-400'
+                          }>
+                            {video.publishStatus === 'published' ? 'تم الرفع بنجاح' : 
+                             video.publishStatus === 'failed' ? 'فشل الرفع' : 'قيد الانتظار...'}
+                          </span>
+                        </div>
+                        {video.channelName && (
+                          <div className="text-sm text-zinc-300">
+                            <span className="font-bold text-zinc-500">القناة:</span> {video.channelName}
+                          </div>
+                        )}
+                        {video.youtubeUrl && (
+                          <div className="text-sm text-zinc-300">
+                            <span className="font-bold text-zinc-500">الرابط:</span> 
+                            <a href={video.youtubeUrl} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline mr-1" onClick={(e) => e.stopPropagation()}>
+                              عرض على يوتيوب
+                            </a>
+                          </div>
+                        )}
+                        {video.publishedAt && (
+                          <div className="text-xs text-zinc-500 mt-1">
+                            آخر تحديث: {new Date(video.publishedAt).toLocaleString('ar-SA')}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 mt-5">
-                  <button className="flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white py-2.5 rounded-xl text-sm font-medium transition-colors">
+                  <button 
+                    onClick={() => video.videoUrl && handleDownload(video.videoUrl, video.title, video.overlayText, video.audioUrl)}
+                    className="flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white py-2.5 rounded-xl text-sm font-medium transition-colors"
+                  >
                     <Download className="w-4 h-4" />
                     تحميل
                   </button>
@@ -961,7 +1174,13 @@ export function LibraryView() {
                       يوتيوب
                     </a>
                   ) : (
-                    <button className="flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 text-white py-2.5 rounded-xl text-sm font-medium transition-colors">
+                    <button 
+                      onClick={() => {
+                        setVideoToPublish(video);
+                        setIsChannelSelectionOpen(true);
+                      }}
+                      className="flex items-center justify-center gap-2 bg-violet-600 hover:bg-violet-700 text-white py-2.5 rounded-xl text-sm font-medium transition-colors"
+                    >
                       <Send className="w-4 h-4" />
                       نشر
                     </button>
@@ -972,6 +1191,53 @@ export function LibraryView() {
           );
         })}
       </div>
+      {publishingStatus !== 'idle' && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full max-w-md space-y-6">
+            <h3 className="text-xl font-bold text-white">
+              {publishingStatus === 'downloading' ? 'جاري تحميل الفيديو...' : 
+               publishingStatus === 'uploading' ? 'جاري الرفع إلى يوتيوب...' :
+               publishingStatus === 'success' ? 'تم النشر بنجاح!' :
+               'حدث خطأ أثناء النشر'}
+            </h3>
+            <div className="w-full bg-zinc-800 rounded-full h-4 overflow-hidden">
+              <div 
+                className={`h-full transition-all duration-300 ${publishingStatus === 'error' ? 'bg-red-500' : 'bg-violet-600'}`}
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <p className="text-center text-zinc-400">{progress}%</p>
+          </div>
+        </div>
+      )}
+      {isChannelSelectionOpen && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full max-w-md space-y-6">
+            <h3 className="text-xl font-bold text-white">اختر القناة للنشر</h3>
+            <div className="space-y-2">
+              {channels.map(channel => (
+                <button
+                  key={channel.id}
+                  onClick={() => {
+                    handlePublish(videoToPublish!, channel);
+                    setIsChannelSelectionOpen(false);
+                  }}
+                  className="w-full flex items-center gap-3 p-3 bg-zinc-950 hover:bg-zinc-800 rounded-xl border border-zinc-800 transition-all"
+                >
+                  <img src={channel.thumbnail} alt="" className="w-10 h-10 rounded-full" />
+                  <span className="text-white font-bold">{channel.title}</span>
+                </button>
+              ))}
+            </div>
+            <button 
+              onClick={() => setIsChannelSelectionOpen(false)}
+              className="w-full py-3 bg-zinc-800 text-white rounded-xl font-bold"
+            >
+              إلغاء
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
