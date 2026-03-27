@@ -56,6 +56,7 @@ export function LibraryView() {
             channelName: data.channelName,
             title: data.title,
             overlayText: data.overlayText,
+            template: data.template || 'sigma-red',
             poster: data.thumbnail,
             renderContent: (isPlaying: boolean) => (
               <>
@@ -129,7 +130,7 @@ export function LibraryView() {
     }
   };
 
-  const handleDownload = async (url: string, title: string, overlayText?: string, audioUrl?: string) => {
+  const handleDownload = async (url: string, title: string, overlayText?: string, audioUrl?: string, template?: string) => {
     try {
       // Use the server-side proxy to download the video and bypass CORS
       let proxyUrl = `/api/proxy-download?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(title || 'video')}.mp4&apiKey=${getCurrentApiKey()}`;
@@ -138,6 +139,9 @@ export function LibraryView() {
       }
       if (audioUrl) {
         proxyUrl += `&audioUrl=${encodeURIComponent(audioUrl)}`;
+      }
+      if (template) {
+        proxyUrl += `&templateId=${encodeURIComponent(template)}`;
       }
       window.location.href = proxyUrl;
     } catch (error) {
@@ -197,6 +201,7 @@ export function LibraryView() {
           title: video.title || video.category,
           description: video.description || video.overlayText,
           overlayText: video.overlayText,
+          templateId: video.template,
           publishNow: true,
           channelId: channel.id,
           apiKey: getCurrentApiKey()
@@ -420,6 +425,27 @@ export function LibraryView() {
       videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
       poster: 'https://picsum.photos/seed/mountains/400/800',
+      overlayText: `قمم السحاب ☁️
+
+فوق السحاب، حيث يلامس الجبل السماء،
+
+تتلاشى كل الهموم وتصغر كل العقبات،
+
+من هنا، يبدو العالم هادئاً ومسالماً،
+
+رحلة بصرية تأخذك إلى آفاق جديدة.
+
+تأمل في عظمة الخالق في هذا الكون،
+
+واستمد قوتك من شموخ الجبال.
+
+كل قمة تصل إليها هي بداية لتحدٍ جديد،
+
+لا تتوقف عن الصعود نحو أحلامك.
+
+دع روحك تحلق عالياً بحرية تامة،
+
+واصنع من الغيوم جسراً نحو طموحاتك 🏔️`,
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -456,6 +482,27 @@ export function LibraryView() {
       videoUrl: 'https://assets.codepen.io/3364143/7btrrd.mp4', // Highly reliable video URL
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3', // Reliable audio URL
       poster: 'https://picsum.photos/seed/waterfall_new/400/800',
+      overlayText: `تدفق الحياة 🌊
+
+استمع إلى صوت الشلال المتدفق،
+
+كيف يشق طريقه عبر الصخور بقوة وثبات،
+
+هكذا هي الحياة، مستمرة لا تتوقف،
+
+دع همومك تنجرف مع هذا التيار الصافي.
+
+في كل قطرة ماء، هناك حياة جديدة،
+
+وفي كل لحظة تأمل، هناك سلام داخلي.
+
+تنفس بعمق، واملأ رئتيك بالهواء النقي،
+
+أنت هنا والآن، في هذه اللحظة المثالية.
+
+دع الطبيعة تغسل روحك من التعب،
+
+وابدأ من جديد بقلب صافٍ كالمياه 💧`,
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -491,6 +538,27 @@ export function LibraryView() {
       music: 'أصوات الفضاء وموسيقى هادئة',
       videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       poster: 'https://picsum.photos/seed/space/400/800',
+      overlayText: `عظمة الكون 🌌
+
+تأمل في سماء الليل المرصعة بالنجوم،
+
+كل نجمة تروي قصة من ملايين السنين،
+
+في هذا الكون الشاسع، ندرك حجمنا الحقيقي،
+
+ومع ذلك، نحمل في داخلنا كونا بأكمله.
+
+الهدوء الذي يغمر الفضاء الخارجي،
+
+يدعونا للبحث عن السلام في أعماقنا.
+
+لا تدع صغائر الأمور تعكر صفو حياتك،
+
+فأنت جزء من هذا النظام الكوني العظيم.
+
+ارفع رأسك دائماً نحو السماء،
+
+وتذكر أن بعد كل ظلام، هناك نور يسطع ✨`,
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -526,6 +594,27 @@ export function LibraryView() {
       music: 'صوت الشلال وموسيقى هادئة',
       videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       poster: 'https://picsum.photos/seed/waterfall5/400/800',
+      overlayText: `فلسفة الماء 🌊
+
+هل راقبت يوماً كيف يتدفق الشلال؟
+
+إنه لا يتوقف عند الصخور القاسية،
+
+بل يلتف حولها أو ينحتها بمرور الزمن.
+
+هكذا هي الحياة، مليئة بالعقبات والتحديات،
+
+لكن المرونة هي سر الاستمرار والنجاح.
+
+الماء يعلمنا أن القوة ليست في القسوة،
+
+بل في الاستمرارية والتدفق الدائم.
+
+مهما كان السقوط مدوياً من أعلى الجبل،
+
+فإنه يصنع في النهاية نهراً هادئاً وجميلاً.
+
+كن كالماء، مرناً، قوياً، ولا تتوقف أبداً ✨`,
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -561,6 +650,27 @@ export function LibraryView() {
       music: 'صوت أمواج البحر وموسيقى هادئة',
       videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       poster: 'https://picsum.photos/seed/oceanwaves/400/800',
+      overlayText: `أسرار المحيط 🌊
+
+البحر يعلمنا الكثير عن الحياة وأسرارها.
+
+أمواجه المتتالية تشبه أيامنا المتعاقبة،
+
+تارة تكون هادئة وتارة أخرى عاصفة ومتمردة.
+
+في أعماقه المظلمة تختبئ أثمن اللآلئ،
+
+وكذلك نحن، أجمل ما فينا يكمن في أعماقنا.
+
+لا تخف من الغوص في بحر أحلامك وطموحاتك،
+
+فالسفن آمنة في الميناء، لكنها لم تُصنع لذلك.
+
+واجه أمواج التحديات بشجاعة وإيمان راسخ،
+
+فبعد كل عاصفة شديدة، يأتي هدوء جميل.
+
+تأمل البحر، واستلهم منه القوة والسكينة ✨`,
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -596,6 +706,13 @@ export function LibraryView() {
       music: 'موسيقى محيطية هادئة',
       videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
       poster: 'https://picsum.photos/seed/sunsetbeach/400/800',
+      overlayText: `غروب ساحر 🌅
+
+أمواج هادئة تلامس الشاطئ،
+
+مع ألوان الغروب الدافئة.
+
+نهاية يوم جميل وبداية للهدوء ✨`,
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -623,6 +740,15 @@ export function LibraryView() {
       date: 'الآن',
       music: 'صوت الطبيعة الأصلي (Veo Audio)',
       videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+            overlayText: `عظمة الخالق 🏔️
+
+مشهد واسع للجبال الشاهقة،
+
+مع تقريب بطيء (Zoom in)
+
+يبرز تفاصيل الطبيعة الساحرة.
+
+تأمل في إبداع الخالق ✨`,
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -652,6 +778,19 @@ export function LibraryView() {
       music: 'بيانو درامي للقصص',
       bgImage: 'https://picsum.photos/seed/landscape/400/800',
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
+            overlayText: `سلام الروح 🍃
+
+كالطبيعة تماماً،
+
+أجمل الأشياء تأخذ وقتاً لتنمو.
+
+لا تستعجل خطواتك،
+
+فكل شجرة عملاقة
+
+كانت يوماً ما مجرد بذرة صغيرة.
+
+أزهر حيثما زُرعت 🌸`,
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-b from-black/10 via-black/40 to-emerald-950/90 z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -683,6 +822,21 @@ export function LibraryView() {
       music: 'جيتار أكوستيك للاسترخاء',
       bgImage: 'https://picsum.photos/seed/underwater/400/800',
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
+            overlayText: `العالم المجهول 🤿
+
+نحن نعرف عن سطح القمر
+
+أكثر مما نعرف عن أعماق محيطاتنا!
+
+أكثر من 80% من المحيطات
+
+لم يتم استكشافها أو رسم خرائط لها.
+
+هناك ملايين الكائنات البحرية
+
+التي تعيش في ظلام دامس
+
+تنتظر من يكتشفها في الأعماق السحيقة 🦑`,
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-t from-cyan-950/90 via-black/40 to-transparent z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -715,6 +869,21 @@ export function LibraryView() {
       music: 'موسيقى محيطية غامضة',
       bgImage: 'https://picsum.photos/seed/milkyway/400/800',
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3',
+            overlayText: `أمطار من الألماس! 💎
+
+هل تعلم أن السماء تمطر ألماساً
+
+في كوكبي المشتري وزحل؟
+
+بسبب العواصف الرعدية العنيفة،
+
+يتحول غاز الميثان إلى كربون،
+
+ومع الضغط الجوي الهائل يسقط
+
+على شكل قطع ألماس صلبة!
+
+ثروات لا تقدر بثمن تسبح في الفضاء 🚀`,
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-b from-black/10 via-black/50 to-indigo-950/90 z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -746,6 +915,23 @@ export function LibraryView() {
       date: 'الآن',
       music: 'صوت الشلال الأصلي (Veo Audio)',
       videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+            overlayText: `لغة الأشجار الخفية 🌲
+
+هل تعلم أن الأشجار في الغابة تتحدث؟
+
+عبر شبكة معقدة من الفطريات تحت الأرض،
+
+تتبادل الأشجار الغذاء والمعلومات باستمرار.
+
+إذا تعرضت شجرة لهجوم من الحشرات،
+
+ترسل إشارات كيميائية سريعة لجيرانها
+
+لتبدأ في إفراز مواد دفاعية تحميها!
+
+حتى الأشجار الأم تغذي صغارها في الظل.
+
+الطبيعة تمتلك إنترنت خاص بها منذ ملايين السنين! 🌍`,
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-b from-black/20 via-black/40 to-black/90 z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -780,6 +966,25 @@ export function LibraryView() {
       date: 'الآن',
       music: 'صوت المطر الطبيعي الأصلي (Veo Audio)',
       videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+            overlayText: `الوحدة الزحامية 🌧️
+
+هل تساءلت يوماً لماذا نشعر بالوحدة
+
+حتى ونحن محاطون بعشرات الأشخاص؟
+
+في علم النفس، يُسمى هذا بـ "الوحدة الزحامية".
+
+أدمغتنا مبرمجة للبحث عن تواصل عميق وحقيقي،
+
+وليس مجرد تفاعلات سطحية عابرة.
+
+عندما نبتسم ونجامل دون أن نشارك مشاعرنا،
+
+يرسل العقل إشارة إنذار بأننا في خطر اجتماعي!
+
+الحل ليس في زيادة عدد الأصدقاء حولك،
+
+بل في إيجاد شخص واحد تفكر معه بصوت عالٍ. 💡`,
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-b from-black/20 via-black/60 to-black/90 z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -815,6 +1020,19 @@ export function LibraryView() {
       date: 'الآن',
       music: 'صوت أمواج البحر الأصلي (Veo Audio)',
       videoUrl: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerEscapes.mp4',
+            overlayText: `سر نفسي غريب! 🧠
+
+عندما تتحدث مع شخص ويكذب عليك،
+
+فإن معدل رمش عينيه يقل بشكل ملحوظ!
+
+ولكن بمجرد أن ينتهي من الكذبة...
+
+يبدأ بالرمش بسرعة جنونية
+
+تصل إلى 8 أضعاف المعدل الطبيعي!
+
+(راقب عيونهم في المرة القادمة 👀)`,
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-gradient-to-b from-black/30 via-black/50 to-black/90 z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -885,6 +1103,15 @@ export function LibraryView() {
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
       title: 'حقيقة تاريخية 📜',
       description: 'أقصر حرب في التاريخ حدثت بين بريطانيا وزنجبار عام 1896م... وانتهت بعد 38 دقيقة فقط! #Shorts #History #Facts',
+            overlayText: `حقيقة تاريخية 📜
+
+أقصر حرب في التاريخ
+
+حدثت بين بريطانيا وزنجبار
+
+عام 1896م...
+
+وانتهت بعد 38 دقيقة فقط!`,
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-amber-900/50 mix-blend-multiply z-0 transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -981,6 +1208,15 @@ export function LibraryView() {
       music: 'موسيقى Lo-Fi هادئة جداً',
       bgImage: 'https://picsum.photos/seed/brain/400/800',
       audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3',
+            overlayText: `هل تعلم؟ 🤯
+
+عين النعامة
+
+أكبر من
+
+حجم دماغها!
+
+👁️ 🧠`,
       renderContent: (isPlaying: boolean) => (
         <>
           <div className={`absolute inset-0 bg-black/60 z-0 backdrop-blur-sm transition-opacity duration-1000 ${isPlaying ? 'opacity-100' : 'opacity-0'}`}></div>
@@ -1162,7 +1398,7 @@ export function LibraryView() {
 
                 <div className="grid grid-cols-2 gap-3 mt-5">
                   <button 
-                    onClick={() => video.videoUrl && handleDownload(video.videoUrl, video.title, video.overlayText, video.audioUrl)}
+                    onClick={() => video.videoUrl && handleDownload(video.videoUrl, video.title, video.overlayText, video.audioUrl, video.template)}
                     className="flex items-center justify-center gap-2 bg-zinc-800 hover:bg-zinc-700 text-white py-2.5 rounded-xl text-sm font-medium transition-colors"
                   >
                     <Download className="w-4 h-4" />

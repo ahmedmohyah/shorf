@@ -11,6 +11,8 @@ import { KeysView } from './components/views/KeysView';
 import { CloneLibraryView } from './components/views/CloneLibraryView';
 import { YouTubeConnectView } from './components/views/YouTubeConnectView';
 import { ScheduleView } from './components/views/ScheduleView';
+import { TemplatesView } from './components/views/TemplatesView';
+import { BackgroundsView } from './components/views/BackgroundsView';
 import { ViewType } from './types';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, User } from 'firebase/auth';
@@ -101,6 +103,8 @@ export default function App() {
       case 'clones': return <CloneLibraryView />;
       case 'youtube-connect': return <YouTubeConnectView />;
       case 'schedule': return <ScheduleView />;
+      case 'templates': return <TemplatesView />;
+      case 'backgrounds': return <BackgroundsView />;
       default: return <DashboardView />;
     }
   };

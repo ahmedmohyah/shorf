@@ -13,7 +13,7 @@ interface ScheduledVideo {
   scheduledTime: string;
   rawTimestamp: number;
   category: string;
-  template: 'modern' | 'cinematic' | 'bold';
+  template: string;
   status: 'pending' | 'generating' | 'scheduled' | 'published' | 'error';
   thumbnail?: string;
   firebaseId?: string;
@@ -217,16 +217,30 @@ ${enabledCategories.map(cat => `- ${cat.label} (${cat.name})`).join('\n')}
 3. الصوت: أصوات طبيعة فقط (Nature sounds, ambient, wind, water, birds).
 4. ممنوع إضافة أي موسيقى نهائياً (STRICTLY NO MUSIC).
 5. الجودة المستهدفة: Full HD (1080p).
-6. النص المعروض (overlayText) يجب أن يكون ملهماً ومكتوباً بأسلوب جذاب (6-10 أسطر).
+6. النص المعروض (overlayText) يجب أن يكون ملهماً ومكتوباً بأسلوب جذاب (6-10 أسطر). يجب أن يبدأ بعنوان رئيسي، يليه سطر فارغ (استخدم \n\n)، ثم بقية النص.
+7. القالب (template): اختر واحداً من القوالب الاحترافية التالية بناءً على نوع المعلومة، ويجب أن يكون بصيغة "اسم القالب-اللون" (مثال: sigma-red):
+   - "sigma": تحفيز ونجاح (خلفية مائلة للعنوان)
+   - "vintage": حقائق تاريخية (خلفية شريطية كلاسيكية)
+   - "news": أخبار عاجلة (خلفية صلبة)
+   - "story": قصة وعبرة (تصميم أنيق)
+   - "tech": معلومات تقنية (تأثير نيون)
+   - "sports": أخبار رياضية (شكل ديناميكي)
+   - "quotes": اقتباسات خالدة (تصميم بسيط)
+   - "education": هل تعلم؟ (تظليل للنص)
+   - "gaming": أسرار الألعاب (تصميم بكسل)
+   - "islamic": نفحات إيمانية (خط عربي أصيل)
+   
+   الألوان المتاحة لكل قالب: red (أحمر), blue (أزرق), green (أخضر), gold (ذهبي).
+   مثال للاختيار: "vintage-gold" أو "tech-blue" أو "news-red".
 
 قم بإرجاع النتيجة بصيغة JSON Array فقط، مع توزيع الفيديوهات بشكل متوازن على التصنيفات المختارة:
 [
   {
     "title": "عنوان الفيديو",
-    "overlayText": "نص الفيديو المكون من 6-10 أسطر",
+    "overlayText": "عنوان الفيديو\\n\\nنص الفيديو المكون من 6-10 أسطر",
     "veoPrompt": "A breathtaking cinematic nature scene of [specific nature element], high detail, 1080p. Sound: Pure nature ambient sounds of [specific sounds]. NO MUSIC.",
     "category": "نفسية",
-    "template": "modern"
+    "template": "sigma-red"
   }
 ]`;
 
@@ -290,7 +304,7 @@ ${enabledCategories.map(cat => `- ${cat.label} (${cat.name})`).join('\n')}
           overlayText: item.overlayText,
           veoPrompt: item.veoPrompt,
           category: item.category || 'عام',
-          template: item.template || 'modern',
+          template: item.template || 'sigma-red',
           scheduledDate: scheduleDate.toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' }),
           scheduledTime: scheduleDate.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
           rawTimestamp: scheduleDate.getTime(),
@@ -338,8 +352,8 @@ ${enabledCategories.map(cat => `- ${cat.label} (${cat.name})`).join('\n')}
     let videoRefId = video.firebaseId;
 
     try {
-      addAgentLog(`[الخطوة 1] توليد فيديو Veo 3.1 لـ: ${video.title}`);
-      setQueue(prev => prev.map(v => v.id === video.id ? { ...v, status: 'generating', progress: 20, progressDetail: 'جاري توليد المشهد الطبيعي (Veo 3.1)...' } : v));
+      addAgentLog(`[الخطوة 1] اختيار خلفية من المكتبة لـ: ${video.title}`);
+      setQueue(prev => prev.map(v => v.id === video.id ? { ...v, status: 'generating', progress: 20, progressDetail: 'جاري اختيار خلفية من المكتبة...' } : v));
       
       const userId = auth.currentUser?.uid || 'anonymous';
 
@@ -355,34 +369,19 @@ ${enabledCategories.map(cat => `- ${cat.label} (${cat.name})`).join('\n')}
         setQueue(prev => prev.map(v => v.id === video.id ? { ...v, firebaseId: videoRefId } : v));
       }
 
-      // @ts-ignore
-      if (window.aistudio && typeof window.aistudio.hasSelectedApiKey === 'function') {
-        // @ts-ignore
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        if (!hasKey) {
-          throw new Error("لم يتم اختيار مفتاح API. يرجى اختيار مفتاح API صالح.");
-        }
+      // Fetch a random background from the library instead of generating with Veo
+      const bgRes = await fetch('/api/geminigen/history?filter_by=all&items_per_page=50&page=1');
+      if (!bgRes.ok) throw new Error("فشل في جلب الخلفيات من المكتبة");
+      const bgData = await bgRes.json();
+      const availableBackgrounds = bgData.result
+        ?.filter((item: any) => item.status === 2 && item.last_frame_url)
+        .map((item: any) => item.last_frame_url.replace('_last_frame.jpg', '.mp4')) || [];
+
+      if (availableBackgrounds.length === 0) {
+        throw new Error("لا توجد خلفيات متاحة في المكتبة. يرجى توليد خلفيات أولاً.");
       }
 
-      let operation = await retryWithBackoff(async (ai) => {
-        let op = await ai.models.generateVideos({
-          model: 'veo-3.1-fast-generate-preview',
-          prompt: video.veoPrompt,
-          config: {
-            numberOfVideos: 1,
-            resolution: '1080p',
-            aspectRatio: '9:16'
-          }
-        });
-
-        while (!op.done) {
-          await new Promise(resolve => setTimeout(resolve, 10000));
-          op = await ai.operations.getVideosOperation({ operation: op });
-        }
-        return op;
-      });
-
-      const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+      const downloadLink = availableBackgrounds[Math.floor(Math.random() * availableBackgrounds.length)];
       if (!downloadLink) throw new Error("فشل في الحصول على رابط الفيديو");
 
       addAgentLog(`[الخطوة 2] تم توليد المشهد. جاري دمج النص وتنسيق الفيديو...`);
@@ -405,6 +404,7 @@ ${enabledCategories.map(cat => `- ${cat.label} (${cat.name})`).join('\n')}
           title: video.title,
           description: video.overlayText,
           overlayText: video.overlayText,
+          templateId: video.template,
           scheduledTime: isImmediate ? Date.now() : video.rawTimestamp,
           channelId: video.channelId,
           publishNow: isImmediate,

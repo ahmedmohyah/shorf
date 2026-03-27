@@ -18,39 +18,82 @@ if (ffmpegStatic) {
 
 dotenv.config();
 
-// Download Arabic font for video processing
-const fontPath = path.join(os.tmpdir(), 'Cairo-Bold.ttf');
-async function downloadFont() {
-  if (!fs.existsSync(fontPath)) {
-    try {
-      console.log('Downloading Arabic font...');
-      const response = await axios({
-        method: 'GET',
-        url: 'https://github.com/google/fonts/raw/main/ofl/cairo/Cairo-Bold.ttf',
-        responseType: 'stream'
-      });
-      const writer = fs.createWriteStream(fontPath);
-      response.data.pipe(writer);
-      await new Promise<void>((resolve, reject) => {
-        writer.on('finish', () => resolve());
-        writer.on('error', reject);
-      });
-      console.log('Font downloaded successfully.');
-      registerFont(fontPath, { family: 'Cairo' });
-    } catch (error) {
-      console.error('Failed to download font:', error);
+const fontsToDownload = [
+  { name: 'Cairo', url: 'https://github.com/google/fonts/raw/main/ofl/cairo/Cairo-Bold.ttf', file: 'Cairo-Bold.ttf' },
+  { name: 'Amiri', url: 'https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Bold.ttf', file: 'Amiri-Bold.ttf' },
+  { name: 'Lalezar', url: 'https://github.com/google/fonts/raw/main/ofl/lalezar/Lalezar-Regular.ttf', file: 'Lalezar-Regular.ttf' },
+  { name: 'Tajawal', url: 'https://github.com/google/fonts/raw/main/ofl/tajawal/Tajawal-Bold.ttf', file: 'Tajawal-Bold.ttf' },
+  { name: 'Changa', url: 'https://github.com/google/fonts/raw/main/ofl/changa/Changa-Bold.ttf', file: 'Changa-Bold.ttf' },
+  { name: 'Aref Ruqaa', url: 'https://github.com/google/fonts/raw/main/ofl/arefruqaa/ArefRuqaa-Bold.ttf', file: 'ArefRuqaa-Bold.ttf' },
+  { name: 'Reem Kufi', url: 'https://github.com/google/fonts/raw/main/ofl/reemkufi/ReemKufi-Bold.ttf', file: 'ReemKufi-Bold.ttf' },
+  { name: 'Readex Pro', url: 'https://github.com/google/fonts/raw/main/ofl/readexpro/ReadexPro-Bold.ttf', file: 'ReadexPro-Bold.ttf' },
+  { name: 'Lemonada', url: 'https://github.com/google/fonts/raw/main/ofl/lemonada/Lemonada-Bold.ttf', file: 'Lemonada-Bold.ttf' },
+  { name: 'Lateef', url: 'https://github.com/google/fonts/raw/main/ofl/lateef/Lateef-Regular.ttf', file: 'Lateef-Regular.ttf' }
+];
+
+async function downloadFonts() {
+  for (const font of fontsToDownload) {
+    const fontPath = path.join(os.tmpdir(), font.file);
+    if (!fs.existsSync(fontPath)) {
+      console.log(`Downloading ${font.name} font...`);
+      try {
+        const response = await axios({
+          method: 'GET',
+          url: font.url,
+          responseType: 'stream'
+        });
+        const writer = fs.createWriteStream(fontPath);
+        response.data.pipe(writer);
+        await new Promise<void>((resolve, reject) => {
+          writer.on('finish', () => resolve());
+          writer.on('error', reject);
+        });
+        console.log(`${font.name} font downloaded successfully.`);
+      } catch (error) {
+        console.error(`Failed to download ${font.name} font:`, error);
+      }
     }
-  } else {
-    registerFont(fontPath, { family: 'Cairo' });
+    try {
+      registerFont(fontPath, { family: font.name });
+    } catch (e) {
+      console.error(`Failed to register font ${font.name}:`, e);
+    }
   }
 }
-downloadFont();
+downloadFonts();
 
-async function generateOverlayImage(text: string, outputPath: string) {
+const baseTemplates = {
+  'sigma': { font: 'Cairo', style: 'slanted', align: 'center', yOffset: 150 },
+  'vintage': { font: 'Amiri', style: 'ribbon', align: 'center', yOffset: 150 },
+  'news': { font: 'Tajawal', style: 'solid', align: 'center', yOffset: 150 },
+  'story': { font: 'Aref Ruqaa', style: 'elegant', align: 'center', yOffset: 150 },
+  'tech': { font: 'Changa', style: 'neon', align: 'center', yOffset: 150 },
+  'sports': { font: 'Lalezar', style: 'dynamic', align: 'center', yOffset: 150 },
+  'quotes': { font: 'Reem Kufi', style: 'minimal', align: 'center', yOffset: 500 },
+  'education': { font: 'Readex Pro', style: 'highlight', align: 'center', yOffset: 150 },
+  'gaming': { font: 'Lemonada', style: 'pixel', align: 'center', yOffset: 150 },
+  'islamic': { font: 'Lateef', style: 'calligraphy', align: 'center', yOffset: 150 },
+  'default': { font: 'Cairo', style: 'solid', align: 'center', yOffset: 150 }
+};
+
+const colorPalette = {
+  'red': '#EF4444',
+  'blue': '#3B82F6',
+  'green': '#10B981',
+  'gold': '#F59E0B',
+  'default': '#EF4444'
+};
+
+async function generateOverlayImage(text: string, outputPath: string, templateId: string = 'default') {
   const width = 1080;
   const height = 1920;
   const canvas = createCanvas(width, height);
   const ctx = canvas.getContext('2d');
+
+  // Parse templateId (e.g., 'sigma-red')
+  const [baseId, colorId] = templateId.split('-');
+  const template = baseTemplates[baseId as keyof typeof baseTemplates] || baseTemplates['default'];
+  const primaryColor = colorPalette[colorId as keyof typeof colorPalette] || colorPalette['default'];
 
   ctx.clearRect(0, 0, width, height);
 
@@ -59,15 +102,18 @@ async function generateOverlayImage(text: string, outputPath: string) {
   const title = parts.length > 1 ? parts[0] : '';
   const bodyText = parts.length > 1 ? parts.slice(1).join('\n\n') : text;
 
-  // Add a gradient at the bottom for readability (like in the library)
-  const gradient = ctx.createLinearGradient(0, height - 800, 0, height);
-  gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
-  gradient.addColorStop(0.5, 'rgba(0, 0, 0, 0.5)');
-  gradient.addColorStop(1, 'rgba(0, 0, 0, 0.9)');
+  // Add a gradient at the bottom for readability
+  const gradientHeight = template.yOffset === 500 ? 1200 : 800;
+  const gradientStart = height - gradientHeight;
+  const gradient = ctx.createLinearGradient(0, gradientStart, 0, height);
+  gradient.addColorStop(0, 'rgba(0,0,0,0)');
+  gradient.addColorStop(0.5, 'rgba(0,0,0,0.7)');
+  gradient.addColorStop(1, 'rgba(0,0,0,0.9)');
+  
   ctx.fillStyle = gradient;
-  ctx.fillRect(0, height - 800, width, 800);
+  ctx.fillRect(0, gradientStart, width, gradientHeight);
 
-  ctx.textAlign = 'center';
+  ctx.textAlign = template.align as CanvasTextAlign;
   ctx.textBaseline = 'middle';
 
   // Add shadow for better readability
@@ -77,10 +123,10 @@ async function generateOverlayImage(text: string, outputPath: string) {
   ctx.shadowOffsetY = 4;
 
   const maxWidth = 900;
-  let currentY = height - 100; // Start from bottom and go up
+  let currentY = height - template.yOffset; // Start from bottom and go up
 
   // Process body text
-  ctx.font = 'bold 50px Cairo';
+  ctx.font = `bold 50px ${template.font}`;
   const bodyLines = bodyText.split('\n');
   const processedBodyLines: string[] = [];
   
@@ -102,16 +148,18 @@ async function generateOverlayImage(text: string, outputPath: string) {
 
   // Draw body text from bottom up
   const bodyLineHeight = 80;
-  ctx.fillStyle = 'white';
+  ctx.fillStyle = '#FFFFFF';
+  const xPos = template.align === 'right' ? width - 90 : (template.align === 'left' ? 90 : width / 2);
+  
   for (let i = processedBodyLines.length - 1; i >= 0; i--) {
-    ctx.fillText(processedBodyLines[i], width / 2, currentY);
+    ctx.fillText(processedBodyLines[i], xPos, currentY);
     currentY -= bodyLineHeight;
   }
 
   // Draw title
   if (title) {
     currentY -= 40; // Add some space between title and body
-    ctx.font = '900 80px Cairo'; // Black/bolder font for title
+    ctx.font = `900 80px ${template.font}`; // Black/bolder font for title
     
     const titleWords = title.split(' ');
     let titleLine = '';
@@ -131,7 +179,75 @@ async function generateOverlayImage(text: string, outputPath: string) {
 
     const titleLineHeight = 110;
     for (let i = titleLines.length - 1; i >= 0; i--) {
-      ctx.fillText(titleLines[i], width / 2, currentY);
+      const line = titleLines[i].trim();
+      const textWidth = ctx.measureText(line).width;
+      
+      // Draw title background based on style
+      ctx.save();
+      ctx.shadowColor = 'transparent';
+      ctx.fillStyle = primaryColor;
+      
+      const paddingX = 40;
+      const paddingY = 20;
+      const bgWidth = textWidth + paddingX * 2;
+      const bgHeight = 100;
+      const bgX = template.align === 'center' ? xPos - bgWidth / 2 : (template.align === 'right' ? xPos - textWidth - paddingX : xPos - paddingX);
+      const bgY = currentY - bgHeight / 2;
+
+      if (template.style === 'slanted') {
+        ctx.beginPath();
+        ctx.moveTo(bgX + 20, bgY);
+        ctx.lineTo(bgX + bgWidth, bgY);
+        ctx.lineTo(bgX + bgWidth - 20, bgY + bgHeight);
+        ctx.lineTo(bgX, bgY + bgHeight);
+        ctx.closePath();
+        ctx.fill();
+      } else if (template.style === 'ribbon') {
+        ctx.fillRect(bgX, bgY, bgWidth, bgHeight);
+        // Ribbon tails
+        ctx.beginPath();
+        ctx.moveTo(bgX, bgY);
+        ctx.lineTo(bgX - 20, bgY + bgHeight / 2);
+        ctx.lineTo(bgX, bgY + bgHeight);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(bgX + bgWidth, bgY);
+        ctx.lineTo(bgX + bgWidth + 20, bgY + bgHeight / 2);
+        ctx.lineTo(bgX + bgWidth, bgY + bgHeight);
+        ctx.fill();
+      } else if (template.style === 'solid' || template.style === 'highlight') {
+        ctx.fillRect(bgX, bgY, bgWidth, bgHeight);
+      } else if (template.style === 'neon') {
+        ctx.shadowColor = primaryColor;
+        ctx.shadowBlur = 20;
+        ctx.strokeStyle = primaryColor;
+        ctx.lineWidth = 4;
+        ctx.strokeRect(bgX, bgY, bgWidth, bgHeight);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(bgX, bgY, bgWidth, bgHeight);
+      } else if (template.style === 'dynamic') {
+        ctx.beginPath();
+        ctx.moveTo(bgX, bgY);
+        ctx.lineTo(bgX + bgWidth, bgY - 10);
+        ctx.lineTo(bgX + bgWidth, bgY + bgHeight);
+        ctx.lineTo(bgX, bgY + bgHeight + 10);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        // Default minimal background
+        if (template.style !== 'minimal') {
+          ctx.fillRect(bgX, bgY, bgWidth, bgHeight);
+        }
+      }
+      ctx.restore();
+
+      // Draw title text
+      ctx.fillStyle = '#FFFFFF';
+      if (template.style === 'neon') {
+        ctx.shadowColor = primaryColor;
+        ctx.shadowBlur = 10;
+      }
+      ctx.fillText(line, xPos, currentY);
       currentY -= titleLineHeight;
     }
   }
@@ -537,8 +653,24 @@ async function startServer() {
     }
   });
 
+  app.get('/api/geminigen/history', async (req, res) => {
+    try {
+      const { page = 1, filter_by = 'all', items_per_page = 20 } = req.query;
+      const response = await axios.get(`https://api.geminigen.ai/uapi/v1/histories`, {
+        params: { page, filter_by, items_per_page },
+        headers: {
+          'x-api-key': 'geminiai-e098b97aa16085449c3eb4ad77b35142'
+        }
+      });
+      res.json(response.data);
+    } catch (error: any) {
+      console.error('Error proxying geminigen history:', error.message);
+      res.status(500).json({ error: 'Failed to fetch history', details: error.message });
+    }
+  });
+
   app.get('/api/proxy-download', async (req, res) => {
-      const { url, filename, apiKey, overlayText, audioUrl } = req.query;
+      const { url, filename, apiKey, overlayText, audioUrl, templateId } = req.query;
       if (!url) return res.status(400).send('URL is required');
 
       try {
@@ -601,22 +733,22 @@ async function startServer() {
             }
 
             if (overlayText) {
-              await generateOverlayImage(overlayText as string, overlayImagePath);
+              await generateOverlayImage(overlayText as string, overlayImagePath, templateId as string);
             }
 
             // Fix the input index for overlay if audio is present
-            let outputOptions = ['-c:v libx264', '-preset fast', '-crf 23', '-t 8'];
+            let outputOptions = ['-c:v libx264', '-preset fast', '-crf 23', '-t 8', '-pix_fmt yuv420p'];
             
             if (overlayText && audioUrl) {
               // 0: video, 1: audio, 2: image
-              command = command.input(overlayImagePath);
+              command = command.input(overlayImagePath).inputOptions(['-loop 1']);
               command = command.complexFilter([
                 '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg]',
                 '[bg][2:v]overlay=0:0[outv]'
               ]);
               outputOptions.push('-map', '[outv]', '-map', '1:a', '-c:a', 'aac');
             } else if (overlayText && !audioUrl) {
-              command = command.input(overlayImagePath);
+              command = command.input(overlayImagePath).inputOptions(['-loop 1']);
               command = command.complexFilter([
                 '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg]',
                 '[bg][1:v]overlay=0:0[outv]'
@@ -634,7 +766,7 @@ async function startServer() {
                 .outputOptions(outputOptions)
                 .save(processedVideoPath)
                 .on('end', () => resolve())
-                .on('error', reject);
+                .on('error', (err, stdout, stderr) => reject(new Error(`${err.message} - ${stderr}`)));
             });
 
             res.setHeader('Content-Type', 'video/mp4');
@@ -656,7 +788,7 @@ async function startServer() {
             if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
             if (fs.existsSync(overlayImagePath)) fs.unlinkSync(overlayImagePath);
             if (fs.existsSync(processedVideoPath)) fs.unlinkSync(processedVideoPath);
-            throw err;
+            throw new Error(`Video processing failed: ${err.message} - ${err.stderr || 'No stderr'}`);
           }
         }
 
@@ -665,12 +797,12 @@ async function startServer() {
       response.data.pipe(res);
     } catch (error: any) {
       console.error('[Proxy] Download failed:', error.message);
-      res.status(500).send('Failed to download video: ' + error.message);
+      res.status(500).json({ error: 'Failed to download video', details: error.message });
     }
   });
 
   app.post('/api/youtube/schedule', async (req, res) => {
-    const { videoId, videoUrl, title, description, overlayText, audioUrl, scheduledTime, channelId, publishNow, apiKey } = req.body;
+    const { videoId, videoUrl, title, description, overlayText, audioUrl, templateId, scheduledTime, channelId, publishNow, apiKey } = req.body;
     
     // 1. Pre-upload verification
     if (!videoId || !videoUrl || !channelId) {
@@ -786,20 +918,20 @@ async function startServer() {
 
           if (overlayText) {
             overlayImagePath = path.join(os.tmpdir(), `overlay-${Date.now()}.png`);
-            await generateOverlayImage(overlayText, overlayImagePath);
+            await generateOverlayImage(overlayText, overlayImagePath, templateId);
           }
 
-          let outputOptions = ['-c:v libx264', '-preset fast', '-crf 23', '-t 8'];
+          let outputOptions = ['-c:v libx264', '-preset fast', '-crf 23', '-t 8', '-pix_fmt yuv420p'];
           
           if (overlayText && audioUrl) {
-            command = command.input(overlayImagePath!);
+            command = command.input(overlayImagePath!).inputOptions(['-loop 1']);
             command = command.complexFilter([
               '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg]',
               '[bg][2:v]overlay=0:0[outv]'
             ]);
             outputOptions.push('-map', '[outv]', '-map', '1:a', '-c:a', 'aac');
           } else if (overlayText && !audioUrl) {
-            command = command.input(overlayImagePath!);
+            command = command.input(overlayImagePath!).inputOptions(['-loop 1']);
             command = command.complexFilter([
               '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg]',
               '[bg][1:v]overlay=0:0[outv]'
@@ -820,9 +952,9 @@ async function startServer() {
                 console.log('[YouTube] Video processing finished.');
                 resolve();
               })
-              .on('error', (err) => {
-                console.error('[YouTube] Video processing error:', err);
-                reject(err);
+              .on('error', (err, stdout, stderr) => {
+                console.error('[YouTube] Video processing error:', err, stderr);
+                reject(new Error(`${err.message} - ${stderr}`));
               });
           });
 

@@ -14,7 +14,7 @@ interface ScheduledVideo {
   scheduledTime: string;
   rawTimestamp: number;
   category: string;
-  template: 'modern' | 'cinematic' | 'bold';
+  template: string;
   status: 'pending' | 'generating' | 'scheduled' | 'published' | 'error';
   thumbnail?: string;
   firebaseId?: string;
@@ -341,11 +341,24 @@ export function PublishView() {
 الموضوع العام: "${niche}".
 كل فيديو يجب أن يحتوي على:
 1. عنوان جذاب جداً يثير الفضول (title).
-2. نص مؤثر يظهر على الشاشة (overlayText) يجب أن يكون من 6 إلى 10 أسطر (طول مناسب للقراءة).
+2. نص مؤثر يظهر على الشاشة (overlayText) يجب أن يكون من 6 إلى 10 أسطر (طول مناسب للقراءة). يجب أن يبدأ بعنوان رئيسي، يليه سطر فارغ (استخدم \n\n)، ثم بقية النص.
 3. وصف باللغة الإنجليزية لمشهد طبيعي عمودي (Vertical 9:16) ليتم توليده عبر نموذج الذكاء الاصطناعي (veoPrompt).
    **هام جداً بخصوص التكوين والصوت:** المشهد يجب أن يكون عمودياً (Vertical) ومناسباً لشاشة الهاتف، ويجب أن ينص الوصف الإنجليزي صراحة على استخدام أصوات الطبيعة (Nature sounds, ambient sounds like wind, water, birds) ويمنع منعاً باتاً وجود أي موسيقى (NO MUSIC, strictly nature sounds only).
 4. التصنيف (category) باللغة العربية.
-5. القالب (template): اختر واحداً من القوالب الاحترافية التالية بخطوط كبيرة وواضحة: "modern" (عصري)، "cinematic" (سينمائي)، أو "bold" (عريض).
+5. القالب (template): اختر واحداً من القوالب الاحترافية التالية بناءً على نوع المعلومة، ويجب أن يكون بصيغة "اسم القالب-اللون" (مثال: sigma-red):
+   - "sigma": تحفيز ونجاح (خلفية مائلة للعنوان)
+   - "vintage": حقائق تاريخية (خلفية شريطية كلاسيكية)
+   - "news": أخبار عاجلة (خلفية صلبة)
+   - "story": قصة وعبرة (تصميم أنيق)
+   - "tech": معلومات تقنية (تأثير نيون)
+   - "sports": أخبار رياضية (شكل ديناميكي)
+   - "quotes": اقتباسات خالدة (تصميم بسيط)
+   - "education": هل تعلم؟ (تظليل للنص)
+   - "gaming": أسرار الألعاب (تصميم بكسل)
+   - "islamic": نفحات إيمانية (خط عربي أصيل)
+   
+   الألوان المتاحة لكل قالب: red (أحمر), blue (أزرق), green (أخضر), gold (ذهبي).
+   مثال للاختيار: "vintage-gold" أو "tech-blue" أو "news-red".
 7. أضف وسم #Shorts في نهاية الوصف (description) لضمان ظهوره كفيديو قصير، واجعل الوصف جذاباً باللغة العربية.
 8. **تنبيه:** يجب أن يكون الفيديو عمودياً بالكامل (Full Vertical 9:16).
 
@@ -353,10 +366,10 @@ export function PublishView() {
 [
   {
     "title": "عنوان الفيديو",
-    "overlayText": "السطر الأول\\nالسطر الثاني\\nالسطر الثالث\\nالسطر الرابع\\nالسطر الخامس\\nالسطر السادس",
+    "overlayText": "عنوان الفيديو\\n\\nالسطر الأول\\nالسطر الثاني\\nالسطر الثالث\\nالسطر الرابع\\nالسطر الخامس",
     "veoPrompt": "Vertical 9:16 cinematic nature scene... Sound: Nature ambient sounds, wind, birds. NO MUSIC.",
     "category": "نفسية",
-    "template": "modern",
+    "template": "sigma-red",
     "description": "وصف الفيديو مع وسم #Shorts"
   }
 ]`;
@@ -418,7 +431,7 @@ export function PublishView() {
           description: item.description || `${item.overlayText}\n\n#Shorts`,
           veoPrompt: item.veoPrompt,
           category: item.category || 'عام',
-          template: item.template || 'modern',
+          template: item.template || 'sigma-red',
           scheduledDate: scheduleDate.toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' }),
           scheduledTime: scheduleDate.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
           rawTimestamp: scheduleDate.getTime(),
@@ -499,35 +512,23 @@ export function PublishView() {
         });
       }
 
-      setQueue(prev => prev.map(v => v.id === video.id ? { ...v, progress: 30, progressDetail: 'جاري توليد الفيديو (Veo 3.1)...' } : v));
-      await updateDoc(doc(db, 'scheduledVideos', videoRefId), { progress: 30, progressDetail: 'جاري توليد الفيديو (Veo 3.1)...' });
+      setQueue(prev => prev.map(v => v.id === video.id ? { ...v, progress: 30, progressDetail: 'جاري اختيار خلفية من المكتبة...' } : v));
+      await updateDoc(doc(db, 'scheduledVideos', videoRefId), { progress: 30, progressDetail: 'جاري اختيار خلفية من المكتبة...' });
 
-      let operation = null;
+      // Fetch a random background from the library instead of generating with Veo
+      const bgRes = await fetch('/api/geminigen/history?filter_by=all&items_per_page=50&page=1');
+      if (!bgRes.ok) throw new Error("فشل في جلب الخلفيات من المكتبة");
+      const bgData = await bgRes.json();
+      const availableBackgrounds = bgData.result
+        ?.filter((item: any) => item.status === 2 && item.last_frame_url)
+        .map((item: any) => item.last_frame_url.replace('_last_frame.jpg', '.mp4')) || [];
 
-      operation = await retryWithBackoff(async (ai) => {
-        let op = await ai.models.generateVideos({
-          model: 'veo-3.1-fast-generate-preview',
-          prompt: video.veoPrompt,
-          config: {
-            numberOfVideos: 1,
-            resolution: '1080p',
-            aspectRatio: '9:16'
-          }
-        });
+      if (availableBackgrounds.length === 0) {
+        throw new Error("لا توجد خلفيات متاحة في المكتبة. يرجى توليد خلفيات أولاً.");
+      }
 
-        // Simulate progress while generating
-        let simulatedProgress = 30;
-        while (!op.done) {
-          await new Promise(resolve => setTimeout(resolve, 10000));
-          simulatedProgress = Math.min(simulatedProgress + 5, 75);
-          setQueue(prev => prev.map(v => v.id === video.id ? { ...v, progress: simulatedProgress } : v));
-          op = await ai.operations.getVideosOperation({ operation: op });
-        }
-        return op;
-      });
+      let downloadLink = availableBackgrounds[Math.floor(Math.random() * availableBackgrounds.length)];
 
-      let downloadLink = operation?.response?.generatedVideos?.[0]?.video?.uri;
-      
       if (!downloadLink) {
         throw new Error("فشل في الحصول على رابط الفيديو المولد");
       }
@@ -545,6 +546,7 @@ export function PublishView() {
           title: video.title,
           description: video.description || `${video.overlayText}\n\n#Shorts`,
           overlayText: video.overlayText,
+          templateId: video.template,
           scheduledTime: video.rawTimestamp,
           channelId: video.channelId,
           apiKey: getCurrentApiKey()
@@ -592,6 +594,7 @@ export function PublishView() {
           title: video.title,
           description: video.description || `${video.overlayText}\n\n#Shorts`,
           overlayText: video.overlayText,
+          templateId: video.template,
           scheduledTime: scheduledTime,
           channelId: channelId,
           publishNow: publishNow,

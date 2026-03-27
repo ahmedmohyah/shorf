@@ -12,7 +12,9 @@ import {
   Key,
   Database,
   LogOut,
-  Youtube
+  Youtube,
+  LayoutTemplate,
+  Image
 } from 'lucide-react';
 import { ViewType } from '../types';
 import { auth } from '../firebase';
@@ -34,6 +36,8 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
     { id: 'script', label: 'توليد النصوص', icon: FileText },
     { id: 'studio', label: 'استوديو Veo 3.1', icon: Video },
     { id: 'library', label: 'مكتبة الفيديوهات', icon: Library },
+    { id: 'templates', label: 'مكتبة القوالب', icon: LayoutTemplate },
+    { id: 'backgrounds', label: 'مكتبة الخلفيات', icon: Image },
     { id: 'schedule', label: 'النشر والجدولة', icon: CalendarClock },
     { id: 'youtube-connect', label: 'ربط يوتيوب', icon: Youtube },
     { id: 'keys', label: 'مفاتيح API', icon: Key },

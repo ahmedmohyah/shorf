@@ -70,17 +70,24 @@ service cloud.firestore {
              data.overlayText is string &&
              data.veoPrompt is string &&
              data.category is string &&
-             data.template in ['modern', 'cinematic', 'bold'] &&
+             data.template is string &&
              data.status in ['pending', 'generating', 'scheduled', 'published', 'error'] &&
              data.rawTimestamp is number &&
              data.userId is string &&
              data.createdAt is string &&
-             (!('description' in data) || data.description is string) &&
-             (!('progress' in data) || data.progress is number) &&
-             (!('progressDetail' in data) || data.progressDetail is string) &&
-             (!('thumbnail' in data) || data.thumbnail is string) &&
-             (!('youtubeUrl' in data) || data.youtubeUrl is string) &&
-             (!('videoUrl' in data) || data.videoUrl is string);
+             (!('description' in data) || data.description == null || data.description is string) &&
+             (!('progress' in data) || data.progress == null || data.progress is number) &&
+             (!('progressDetail' in data) || data.progressDetail == null || data.progressDetail is string) &&
+             (!('thumbnail' in data) || data.thumbnail == null || data.thumbnail is string) &&
+             (!('youtubeUrl' in data) || data.youtubeUrl == null || data.youtubeUrl is string) &&
+             (!('videoUrl' in data) || data.videoUrl == null || data.videoUrl is string) &&
+             (!('batchId' in data) || data.batchId == null || data.batchId is string) &&
+             (!('channelId' in data) || data.channelId == null || data.channelId is string) &&
+             (!('channelName' in data) || data.channelName == null || data.channelName is string) &&
+             (!('scheduledDate' in data) || data.scheduledDate is string) &&
+             (!('scheduledTime' in data) || data.scheduledTime is string) &&
+             (!('id' in data) || data.id is string) &&
+             (!('firebaseId' in data) || data.firebaseId == null || data.firebaseId is string);
     }
 
     function isValidAutomationBatch(data) {
