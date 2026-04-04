@@ -113,6 +113,20 @@
         "role": { "type": "string", "enum": ["admin", "user"] }
       },
       "required": ["uid", "email"]
+    },
+    "Background": {
+      "title": "Background",
+      "description": "A saved background video for use in the studio.",
+      "type": "object",
+      "properties": {
+        "uuid": { "type": "string" },
+        "url": { "type": "string" },
+        "thumbnail": { "type": "string" },
+        "prompt": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uuid", "url", "userId", "createdAt"]
     }
   },
   "firestore": {
@@ -131,6 +145,10 @@
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "User profile documents."
+    },
+    "/backgrounds/{backgroundId}": {
+      "schema": "Background",
+      "description": "Collection of saved backgrounds."
     }
   }
 }

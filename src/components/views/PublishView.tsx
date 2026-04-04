@@ -515,16 +515,46 @@ export function PublishView() {
       setQueue(prev => prev.map(v => v.id === video.id ? { ...v, progress: 30, progressDetail: 'جاري اختيار خلفية من المكتبة...' } : v));
       await updateDoc(doc(db, 'scheduledVideos', videoRefId), { progress: 30, progressDetail: 'جاري اختيار خلفية من المكتبة...' });
 
-      // Fetch a random background from the library instead of generating with Veo
-      const bgRes = await fetch('/api/geminigen/history?filter_by=all&items_per_page=50&page=1');
-      if (!bgRes.ok) throw new Error("فشل في جلب الخلفيات من المكتبة");
-      const bgData = await bgRes.json();
-      const availableBackgrounds = bgData.result
-        ?.filter((item: any) => item.status === 2 && item.last_frame_url)
-        .map((item: any) => item.last_frame_url.replace('_last_frame.jpg', '.mp4')) || [];
+      // Fetch backgrounds from both Firestore library and Geminigen history
+      let availableBackgrounds: string[] = [];
+
+      // 1. Try Firestore Library
+      try {
+        if (auth.currentUser) {
+          const q = query(collection(db, 'backgrounds'), where('userId', '==', auth.currentUser.uid));
+          const querySnapshot = await getDocs(q);
+          querySnapshot.forEach((doc) => {
+            const data = doc.data();
+            if (data.url) {
+              let url = data.url;
+              if (url.includes('last_frames/') && url.endsWith('.mp4')) {
+                url = url.replace('.mp4', '_last_frame.jpg');
+              }
+              availableBackgrounds.push(url);
+            }
+          });
+        }
+      } catch (err) {
+        console.error("Error fetching backgrounds from Firestore:", err);
+      }
+
+      // 2. Try Geminigen History as fallback or additional source
+      try {
+        const bgRes = await fetch('/api/geminigen/history?filter_by=all&items_per_page=50&page=1');
+        if (bgRes.ok) {
+          const bgData = await bgRes.json();
+          const historyBgs = bgData.result
+            ?.filter((item: any) => (item.type.includes('video') || item.inference_type.includes('video')))
+            .map((item: any) => item.generate_result || item.last_frame_url || '')
+            .filter(Boolean) || [];
+          availableBackgrounds = [...availableBackgrounds, ...historyBgs];
+        }
+      } catch (err) {
+        console.error("Error fetching backgrounds from Geminigen history:", err);
+      }
 
       if (availableBackgrounds.length === 0) {
-        throw new Error("لا توجد خلفيات متاحة في المكتبة. يرجى توليد خلفيات أولاً.");
+        throw new Error("لا توجد خلفيات متاحة في المكتبة أو التاريخ. يرجى توليد خلفيات أولاً.");
       }
 
       let downloadLink = availableBackgrounds[Math.floor(Math.random() * availableBackgrounds.length)];

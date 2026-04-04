@@ -375,7 +375,7 @@ ${enabledCategories.map(cat => `- ${cat.label} (${cat.name})`).join('\n')}
       const bgData = await bgRes.json();
       const availableBackgrounds = bgData.result
         ?.filter((item: any) => item.status === 2 && item.last_frame_url)
-        .map((item: any) => item.last_frame_url.replace('_last_frame.jpg', '.mp4')) || [];
+        .map((item: any) => item.generate_result || item.last_frame_url || '') || [];
 
       if (availableBackgrounds.length === 0) {
         throw new Error("لا توجد خلفيات متاحة في المكتبة. يرجى توليد خلفيات أولاً.");

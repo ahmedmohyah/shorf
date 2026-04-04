@@ -45,7 +45,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && 
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
          (request.auth.token.email == "ahmedaoo679@gmail.com" && request.auth.token.email_verified == true));
     }
 
@@ -101,6 +101,17 @@ service cloud.firestore {
              data.createdAt is string;
     }
 
+    function isValidBackground(data) {
+      return data.keys().hasAll(['uuid', 'url', 'userId', 'createdAt']) &&
+             data.uuid is string &&
+             data.url is string &&
+             data.userId is string &&
+             data.createdAt is string &&
+             (!('thumbnail' in data) || data.thumbnail == null || data.thumbnail is string) &&
+             (!('prompt' in data) || data.prompt == null || data.prompt is string) &&
+             (!('serverCreatedAt' in data) || data.serverCreatedAt == null || data.serverCreatedAt is timestamp);
+    }
+
     // Rules for User Profiles
     match /users/{userId} {
       allow read: if isAuthenticated();
@@ -129,6 +140,14 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
       allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidAutomationBatch(request.resource.data);
       allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin()) && isValidAutomationBatch(request.resource.data);
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // Rules for Backgrounds
+    match /backgrounds/{backgroundId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidBackground(request.resource.data);
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin()) && isValidBackground(request.resource.data);
       allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
     }
   }

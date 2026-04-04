@@ -73,6 +73,11 @@ const baseTemplates = {
   'education': { font: 'Readex Pro', style: 'highlight', align: 'center', yOffset: 150 },
   'gaming': { font: 'Lemonada', style: 'pixel', align: 'center', yOffset: 150 },
   'islamic': { font: 'Lateef', style: 'calligraphy', align: 'center', yOffset: 150 },
+  'diamond': { font: 'Cairo', style: 'diamond', align: 'center', yOffset: 150 },
+  'ocean': { font: 'Cairo', style: 'ocean', align: 'center', yOffset: 150 },
+  'orange': { font: 'Cairo', style: 'orange-ribbon', align: 'center', yOffset: 150 },
+  'red': { font: 'Cairo', style: 'red-ribbon', align: 'center', yOffset: 150 },
+  'history': { font: 'Cairo', style: 'history-lines', align: 'center', yOffset: 150 },
   'default': { font: 'Cairo', style: 'solid', align: 'center', yOffset: 150 }
 };
 
@@ -233,6 +238,30 @@ async function generateOverlayImage(text: string, outputPath: string, templateId
         ctx.lineTo(bgX, bgY + bgHeight + 10);
         ctx.closePath();
         ctx.fill();
+      } else if (template.style === 'orange-ribbon') {
+        ctx.fillStyle = '#F97316';
+        ctx.fillRect(bgX, bgY, bgWidth, bgHeight);
+      } else if (template.style === 'red-ribbon') {
+        ctx.fillStyle = '#EF4444';
+        ctx.fillRect(bgX, bgY, bgWidth, bgHeight);
+      } else if (template.style === 'history-lines') {
+        ctx.strokeStyle = '#EAB308';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(bgX, bgY - 10);
+        ctx.lineTo(bgX + bgWidth, bgY - 10);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(bgX, bgY + bgHeight + 10);
+        ctx.lineTo(bgX + bgWidth, bgY + bgHeight + 10);
+        ctx.stroke();
+      } else if (template.style === 'diamond' || template.style === 'ocean') {
+        // Glassmorphism effect
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.fillRect(bgX, bgY, bgWidth, bgHeight);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(bgX, bgY, bgWidth, bgHeight);
       } else {
         // Default minimal background
         if (template.style !== 'minimal') {
@@ -243,11 +272,53 @@ async function generateOverlayImage(text: string, outputPath: string, templateId
 
       // Draw title text
       ctx.fillStyle = '#FFFFFF';
+      if (template.style === 'diamond') ctx.fillStyle = '#3B82F6';
+      if (template.style === 'ocean') ctx.fillStyle = '#06B6D4';
+      if (template.style === 'history-lines') ctx.fillStyle = '#EAB308';
+
       if (template.style === 'neon') {
         ctx.shadowColor = primaryColor;
         ctx.shadowBlur = 10;
       }
+      
+      // Draw icon for specific templates
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.5)';
+      ctx.shadowBlur = 10;
+      if (template.style === 'ocean') {
+        ctx.font = '70px Arial';
+        ctx.fillText('🤿', xPos - textWidth / 2 - 80, currentY);
+      }
+      if (template.style === 'red-ribbon') {
+        ctx.font = '70px Arial';
+        ctx.fillText('🚀', xPos - textWidth / 2 - 80, currentY);
+      }
+      ctx.restore();
+
+      ctx.font = `900 80px ${template.font}`;
       ctx.fillText(line, xPos, currentY);
+
+      // Draw icons below title
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.5)';
+      ctx.shadowBlur = 10;
+      if (template.style === 'diamond') {
+        ctx.font = '70px Arial';
+        ctx.fillText('💎', xPos, currentY + 100);
+      }
+      if (template.style === 'orange-ribbon' || template.style === 'history-lines') {
+        ctx.font = '70px Arial';
+        ctx.fillText('📜', xPos, currentY + 100);
+      }
+      if (template.style === 'ocean') {
+        ctx.font = '80px Arial';
+        ctx.fillText('🦑', xPos, height - 100);
+      }
+      if (template.style === 'diamond') {
+        ctx.font = '80px Arial';
+        ctx.fillText('🚀', xPos, height - 100);
+      }
+      ctx.restore();
       currentY -= titleLineHeight;
     }
   }
@@ -261,7 +332,8 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(cors());
-  app.use(express.json());
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // API routes
   app.get("/api/youtube", async (req, res) => {
@@ -841,7 +913,9 @@ async function startServer() {
       }
 
       // Download the video
-      const tempVideoPath = path.join(os.tmpdir(), `video-${Date.now()}.mp4`);
+      const isImageBackground = videoUrl.toLowerCase().endsWith('.jpg') || videoUrl.toLowerCase().endsWith('.png') || videoUrl.toLowerCase().endsWith('.jpeg');
+      const fileExtension = isImageBackground ? videoUrl.split('.').pop() : 'mp4';
+      const tempVideoPath = path.join(os.tmpdir(), `video-${Date.now()}.${fileExtension}`);
       try {
         const headers: Record<string, string> = {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
@@ -893,11 +967,17 @@ async function startServer() {
       let overlayImagePath: string | null = null;
       let tempAudioPath: string | null = null;
 
-      if (overlayText || audioUrl) {
-        console.log(`[YouTube] Processing video with overlay text or audio...`);
+      if (overlayText || audioUrl || isImageBackground) {
+        console.log(`[YouTube] Processing video with overlay text, audio, or image background...`);
         try {
           const processedVideoPath = path.join(os.tmpdir(), `processed-${Date.now()}.mp4`);
-          let command = ffmpeg(tempVideoPath);
+          let command = ffmpeg();
+          
+          if (isImageBackground) {
+            command = command.input(tempVideoPath).inputOptions(['-loop 1', '-framerate 30']);
+          } else {
+            command = command.input(tempVideoPath);
+          }
           
           if (audioUrl) {
             tempAudioPath = path.join(os.tmpdir(), `audio-${Date.now()}.mp3`);
@@ -919,29 +999,26 @@ async function startServer() {
           if (overlayText) {
             overlayImagePath = path.join(os.tmpdir(), `overlay-${Date.now()}.png`);
             await generateOverlayImage(overlayText, overlayImagePath, templateId);
+            command = command.input(overlayImagePath).inputOptions(['-loop 1']);
           }
 
           let outputOptions = ['-c:v libx264', '-preset fast', '-crf 23', '-t 8', '-pix_fmt yuv420p'];
           
-          if (overlayText && audioUrl) {
-            command = command.input(overlayImagePath!).inputOptions(['-loop 1']);
-            command = command.complexFilter([
-              '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg]',
-              '[bg][2:v]overlay=0:0[outv]'
-            ]);
-            outputOptions.push('-map', '[outv]', '-map', '1:a', '-c:a', 'aac');
-          } else if (overlayText && !audioUrl) {
-            command = command.input(overlayImagePath!).inputOptions(['-loop 1']);
-            command = command.complexFilter([
-              '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg]',
-              '[bg][1:v]overlay=0:0[outv]'
-            ]);
-            outputOptions.push('-map', '[outv]', '-map', '0:a?');
-          } else if (!overlayText && audioUrl) {
-            command = command.complexFilter([
-              '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[outv]'
-            ]);
-            outputOptions.push('-map', '[outv]', '-map', '1:a', '-c:a', 'aac');
+          let filterString = '[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[bg]';
+          
+          if (overlayText) {
+            // If audio is present, overlay is input 2, else input 1
+            const overlayInputIndex = audioUrl ? 2 : 1;
+            filterString += `;[bg][${overlayInputIndex}:v]overlay=0:0[outv]`;
+          }
+
+          command = command.complexFilter(filterString);
+          
+          outputOptions.push('-map', overlayText ? '[outv]' : '[bg]');
+          if (audioUrl) {
+            outputOptions.push('-map', '1:a', '-c:a', 'aac');
+          } else if (!isImageBackground) {
+            outputOptions.push('-map', '0:a?');
           }
 
           await new Promise<void>((resolve, reject) => {
@@ -959,10 +1036,9 @@ async function startServer() {
           });
 
           finalVideoPath = processedVideoPath;
-        } catch (err) {
-          console.error('[YouTube] Failed to process video, falling back to original:', err);
-          // Fallback to original video if processing fails
-          finalVideoPath = tempVideoPath;
+        } catch (err: any) {
+          console.error('[YouTube] Failed to process video:', err);
+          throw new Error(`فشل في معالجة الفيديو: ${err.message}`);
         }
       }
 
@@ -977,7 +1053,7 @@ async function startServer() {
           },
           status: {
             privacyStatus: publishNow ? 'public' : 'private',
-            publishAt: publishNow ? undefined : new Date(scheduledTime).toISOString(),
+            publishAt: publishNow ? undefined : (scheduledTime ? new Date(scheduledTime).toISOString() : undefined),
             selfDeclaredMadeForKids: false,
           },
         },
@@ -996,7 +1072,206 @@ async function startServer() {
       res.json({ success: true, message: publishNow ? "تم نشر الفيديو بنجاح على يوتيوب" : "تمت جدولة الفيديو بنجاح على يوتيوب", youtubeUrl, videoId });
     } catch (error: any) {
       console.error("YouTube scheduling error:", error);
-      res.status(500).json({ error: error.message || "فشل في جدولة الفيديو" });
+      let errorMessage = error.message || "فشل في جدولة الفيديو";
+      if (error.response && error.response.data && error.response.data.error) {
+        errorMessage = error.response.data.error.message || errorMessage;
+      }
+      res.status(500).json({ error: errorMessage });
+    }
+  });
+
+  app.post('/api/video/render-long', async (req, res) => {
+    try {
+      const { scenes, topic } = req.body;
+      if (!scenes || !Array.isArray(scenes) || scenes.length === 0) {
+        return res.status(400).json({ error: "البيانات مفقودة" });
+      }
+
+      const sessionId = Date.now().toString();
+      const tempDir = path.join(os.tmpdir(), `longvideo-${sessionId}`);
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      console.log(`[LongVideo] Starting render for session ${sessionId} with ${scenes.length} scenes`);
+
+      // Download background music
+      const bgMusicUrl = 'https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=documentary-110525.mp3';
+      const bgMusicPath = path.join(tempDir, `bgmusic-${sessionId}.mp3`);
+      try {
+        const response = await axios({ method: 'GET', url: bgMusicUrl, responseType: 'stream' });
+        const writer = fs.createWriteStream(bgMusicPath);
+        response.data.pipe(writer);
+        await new Promise<void>((resolve, reject) => {
+          writer.on('finish', () => resolve());
+          writer.on('error', (err) => reject(err));
+        });
+      } catch (err) {
+        console.error("Failed to download background music, proceeding without it", err);
+        await new Promise<void>((resolve, reject) => {
+          ffmpeg().input('anullsrc').inputFormat('lavfi').duration(60).save(bgMusicPath).on('end', resolve).on('error', reject);
+        });
+      }
+
+      const sceneVideos: string[] = [];
+
+      // Helper to create subtitle image
+      const createSubtitleImage = (text: string, outputPath: string) => {
+        const width = 1920;
+        const height = 1080;
+        const canvas = createCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+
+        // Dark gradient at bottom for readability
+        const gradient = ctx.createLinearGradient(0, height - 250, 0, height);
+        gradient.addColorStop(0, 'rgba(0,0,0,0)');
+        gradient.addColorStop(1, 'rgba(0,0,0,0.85)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, height - 250, width, 250);
+
+        ctx.font = 'bold 55px Arial, Tahoma, sans-serif';
+        ctx.fillStyle = '#FFFFFF';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 5;
+
+        // Simple word wrap
+        const words = text.split(' ');
+        let line = '';
+        const lines = [];
+        const maxWidth = 1600;
+
+        for (let n = 0; n < words.length; n++) {
+          const testLine = line + words[n] + ' ';
+          const metrics = ctx.measureText(testLine);
+          if (metrics.width > maxWidth && n > 0) {
+            lines.push(line);
+            line = words[n] + ' ';
+          } else {
+            line = testLine;
+          }
+        }
+        lines.push(line);
+
+        let y = height - 150 - ((lines.length - 1) * 35);
+        for (let i = 0; i < lines.length; i++) {
+          ctx.strokeText(lines[i], width / 2, y);
+          ctx.fillText(lines[i], width / 2, y);
+          y += 70;
+        }
+
+        fs.writeFileSync(outputPath, canvas.toBuffer('image/png'));
+      };
+
+      // Process each scene
+      for (let i = 0; i < scenes.length; i++) {
+        const scene = scenes[i];
+        const imgPath = path.join(tempDir, `img_${i}.jpg`);
+        const audioPath = path.join(tempDir, `audio_${i}.mp3`);
+        const subPath = path.join(tempDir, `sub_${i}.png`);
+        const outPath = path.join(tempDir, `scene_${i}.mp4`);
+
+        fs.writeFileSync(imgPath, Buffer.from(scene.image, 'base64'));
+        fs.writeFileSync(audioPath, Buffer.from(scene.audio, 'base64'));
+        createSubtitleImage(scene.text, subPath);
+
+        // Render scene with Ken Burns and Subtitles
+        await new Promise<void>((resolve, reject) => {
+          ffmpeg()
+            .input(imgPath)
+            .input(subPath)
+            .inputOptions(['-loop', '1', '-framerate', '30'])
+            .input(audioPath)
+            .complexFilter([
+              // Zoompan effect (zoom in slowly)
+              `[0:v]scale=1920:1080,zoompan=z='min(zoom+0.001,1.5)':d=9000:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':fps=30:s=1920x1080[bg]`,
+              // Overlay subtitle
+              `[bg][1:v]overlay=0:0:shortest=1[v]`
+            ])
+            .outputOptions([
+              '-map', '[v]',
+              '-map', '2:a',
+              '-c:v', 'libx264',
+              '-preset', 'fast',
+              '-pix_fmt', 'yuv420p',
+              '-c:a', 'aac',
+              '-b:a', '192k',
+              '-shortest'
+            ])
+            .save(outPath)
+            .on('end', () => resolve())
+            .on('error', (err, stdout, stderr) => {
+              console.error(`[LongVideo] Error rendering scene ${i}:`, err, stderr);
+              reject(new Error(`فشل في معالجة المشهد ${i + 1}`));
+            });
+        });
+
+        sceneVideos.push(outPath);
+      }
+
+      // Concatenate all scenes
+      const concatTxtPath = path.join(tempDir, 'concat.txt');
+      const concatContent = sceneVideos.map(v => `file '${v}'`).join('\n');
+      fs.writeFileSync(concatTxtPath, concatContent);
+
+      const concatOutPath = path.join(tempDir, `concat_${sessionId}.mp4`);
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg()
+          .input(concatTxtPath)
+          .inputOptions(['-f', 'concat', '-safe', '0'])
+          .outputOptions(['-c', 'copy'])
+          .save(concatOutPath)
+          .on('end', () => resolve())
+          .on('error', (err, stdout, stderr) => {
+            console.error('[LongVideo] Error concatenating scenes:', err, stderr);
+            reject(new Error('فشل في دمج المشاهد'));
+          });
+      });
+
+      // Mix with background music
+      const finalOutPath = path.join(tempDir, `final_${sessionId}.mp4`);
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg()
+          .input(concatOutPath)
+          .input(bgMusicPath)
+          .inputOptions(['-stream_loop', '-1'])
+          .complexFilter([
+            `[0:a]volume=1.0[a1];[1:a]volume=0.05[a2];[a1][a2]amix=inputs=2:duration=first:dropout_transition=2[a]`
+          ])
+          .outputOptions([
+            '-map', '0:v',
+            '-map', '[a]',
+            '-c:v', 'copy',
+            '-c:a', 'aac'
+          ])
+          .save(finalOutPath)
+          .on('end', () => resolve())
+          .on('error', (err, stdout, stderr) => {
+            console.error('[LongVideo] Error mixing audio:', err, stderr);
+            reject(new Error('فشل في إضافة الموسيقى'));
+          });
+      });
+
+      // Move to public folder
+      const videoFileName = `video-${sessionId}.mp4`;
+      const publicVideoPath = path.join(process.cwd(), 'public', 'temp');
+      if (!fs.existsSync(publicVideoPath)) {
+        fs.mkdirSync(publicVideoPath, { recursive: true });
+      }
+      const finalDest = path.join(publicVideoPath, videoFileName);
+      fs.copyFileSync(finalOutPath, finalDest);
+
+      // Clean up
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch (e) {
+        console.error("Failed to clean up temp dir", e);
+      }
+
+      res.json({ videoUrl: `/temp/${videoFileName}` });
+
+    } catch (error: any) {
+      console.error('[LongVideo] Error:', error);
+      res.status(500).json({ error: error.message || "فشل في إنشاء الفيديو الطويل" });
     }
   });
 

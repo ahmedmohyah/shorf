@@ -35,6 +35,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
     { id: 'clones', label: 'مكتبة الاستنساخ', icon: Database },
     { id: 'script', label: 'توليد النصوص', icon: FileText },
     { id: 'studio', label: 'استوديو Veo 3.1', icon: Video },
+    { id: 'long-studio', label: 'استوديو الفيديوهات الطويلة', icon: Video },
     { id: 'library', label: 'مكتبة الفيديوهات', icon: Library },
     { id: 'templates', label: 'مكتبة القوالب', icon: LayoutTemplate },
     { id: 'backgrounds', label: 'مكتبة الخلفيات', icon: Image },

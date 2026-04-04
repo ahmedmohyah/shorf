@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Image as ImageIcon, Video, Loader2, Search, Filter, RefreshCw } from 'lucide-react';
+import { Image as ImageIcon, Video, Loader2, Search, Filter, RefreshCw, Bookmark, BookmarkCheck, CheckCircle2 } from 'lucide-react';
+import { db, auth } from '../../firebase';
+import { collection, addDoc, query, where, getDocs, serverTimestamp } from 'firebase/firestore';
 
 interface HistoryItem {
   id: number;
@@ -14,6 +16,7 @@ interface HistoryItem {
   inference_type: string;
   name: string;
   thumbnail_url: string;
+  last_frame_url?: string;
 }
 
 export function BackgroundsView() {
@@ -23,6 +26,23 @@ export function BackgroundsView() {
   const [filter, setFilter] = useState<'all' | 'image' | 'video'>('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [savedUuids, setSavedUuids] = useState<Set<string>>(new Set());
+  const [savingUuid, setSavingUuid] = useState<string | null>(null);
+
+  const fetchSavedBackgrounds = async () => {
+    if (!auth.currentUser) return;
+    try {
+      const q = query(collection(db, 'backgrounds'), where('userId', '==', auth.currentUser.uid));
+      const querySnapshot = await getDocs(q);
+      const uuids = new Set<string>();
+      querySnapshot.forEach((doc) => {
+        uuids.add(doc.data().uuid);
+      });
+      setSavedUuids(uuids);
+    } catch (err) {
+      console.error('Error fetching saved backgrounds:', err);
+    }
+  };
 
   const fetchHistory = async (pageNum = 1) => {
     setLoading(true);
@@ -53,7 +73,49 @@ export function BackgroundsView() {
 
   useEffect(() => {
     fetchHistory(1);
+    const unsubscribe = auth.onAuthStateChanged((user) => {
+      if (user) {
+        fetchSavedBackgrounds();
+      } else {
+        setSavedUuids(new Set());
+      }
+    });
+    return () => unsubscribe();
   }, []);
+
+  const handleSaveToLibrary = async (item: HistoryItem) => {
+    if (!auth.currentUser) {
+      alert('يرجى تسجيل الدخول أولاً');
+      return;
+    }
+    if (savedUuids.has(item.uuid)) return;
+
+    setSavingUuid(item.uuid);
+    try {
+      // Construct video URL if it's a video and generate_result is null
+      let videoUrl = item.generate_result;
+      if (!videoUrl && item.last_frame_url && (item.type.includes('video') || item.inference_type.includes('video'))) {
+        videoUrl = item.last_frame_url;
+      }
+
+      await addDoc(collection(db, 'backgrounds'), {
+        uuid: item.uuid,
+        url: videoUrl || item.thumbnail_url,
+        thumbnail: item.thumbnail_url || item.last_frame_url,
+        prompt: item.input_text || 'بدون وصف',
+        userId: auth.currentUser.uid,
+        createdAt: new Date().toISOString(),
+        serverCreatedAt: serverTimestamp()
+      });
+
+      setSavedUuids(prev => new Set(prev).add(item.uuid));
+    } catch (err) {
+      console.error('Error saving background:', err);
+      alert('حدث خطأ أثناء حفظ الخلفية');
+    } finally {
+      setSavingUuid(null);
+    }
+  };
 
   const filteredHistory = history.filter(item => {
     if (filter === 'all') return true;
@@ -71,7 +133,7 @@ export function BackgroundsView() {
           </div>
           <div>
             <h2 className="text-2xl font-bold text-white">مكتبة الخلفيات</h2>
-            <p className="text-zinc-400">استدعاء الخلفيات من Geminigen History</p>
+            <p className="text-zinc-400">استدعاء الخلفيات من Geminigen History وحفظها في مكتبتك الخاصة</p>
           </div>
         </div>
 
@@ -123,45 +185,74 @@ export function BackgroundsView() {
       ) : (
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {filteredHistory.map((item) => (
-              <div key={item.uuid} className="group relative aspect-[9/16] bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 hover:border-blue-500/50 transition-colors">
-                {item.type.includes('video') || item.inference_type.includes('video') ? (
-                  <video 
-                    src={item.generate_result} 
-                    poster={item.thumbnail_url}
-                    className="w-full h-full object-cover"
-                    muted 
-                    loop 
-                    onMouseEnter={(e) => e.currentTarget.play()}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.pause();
-                      e.currentTarget.currentTime = 0;
-                    }}
-                  />
-                ) : (
-                  <img 
-                    src={item.thumbnail_url || item.generate_result} 
-                    alt={item.input_text}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
-                )}
-                
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4">
-                  <p className="text-white text-xs line-clamp-3 mb-2" dir="auto">{item.input_text}</p>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-zinc-400 bg-zinc-800/80 px-2 py-1 rounded-md">
-                      {item.model_name}
-                    </span>
-                    {item.type.includes('video') || item.inference_type.includes('video') ? (
-                      <Video className="w-4 h-4 text-blue-400" />
-                    ) : (
-                      <ImageIcon className="w-4 h-4 text-purple-400" />
-                    )}
+            {filteredHistory.map((item) => {
+              const videoUrl = item.generate_result || item.last_frame_url || '';
+              const isVideo = (item.type.includes('video') || item.inference_type.includes('video')) && 
+                              !videoUrl.toLowerCase().endsWith('.jpg') && 
+                              !videoUrl.toLowerCase().endsWith('.png') && 
+                              !videoUrl.toLowerCase().endsWith('.jpeg');
+              
+              return (
+                <div key={item.uuid} className="group relative aspect-[9/16] bg-zinc-900 rounded-2xl overflow-hidden border border-zinc-800 hover:border-blue-500/50 transition-colors">
+                  {isVideo ? (
+                    <video 
+                      src={videoUrl} 
+                      poster={item.thumbnail_url}
+                      className="w-full h-full object-cover"
+                      muted 
+                      loop 
+                      onMouseEnter={(e) => e.currentTarget.play()}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.pause();
+                        e.currentTarget.currentTime = 0;
+                      }}
+                    />
+                  ) : (
+                    <img 
+                      src={item.thumbnail_url || item.generate_result} 
+                      alt={item.input_text}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  )}
+                  
+                  <div className="absolute inset-x-0 top-0 p-3 flex justify-end opacity-0 group-hover:opacity-100 transition-opacity z-20">
+                    <button
+                      onClick={() => handleSaveToLibrary(item)}
+                      disabled={savedUuids.has(item.uuid) || savingUuid === item.uuid}
+                      className={`p-2 rounded-lg backdrop-blur-md transition-all ${
+                        savedUuids.has(item.uuid) 
+                          ? 'bg-green-500/20 text-green-400 border border-green-500/50' 
+                          : 'bg-black/40 text-white border border-white/20 hover:bg-blue-600 hover:border-blue-500'
+                      }`}
+                      title={savedUuids.has(item.uuid) ? 'محفوظ في المكتبة' : 'حفظ في المكتبة'}
+                    >
+                      {savingUuid === item.uuid ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : savedUuids.has(item.uuid) ? (
+                        <BookmarkCheck className="w-4 h-4" />
+                      ) : (
+                        <Bookmark className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4">
+                    <p className="text-white text-xs line-clamp-3 mb-2" dir="auto">{item.input_text}</p>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-zinc-400 bg-zinc-800/80 px-2 py-1 rounded-md">
+                        {item.model_name}
+                      </span>
+                      {isVideo ? (
+                        <Video className="w-4 h-4 text-blue-400" />
+                      ) : (
+                        <ImageIcon className="w-4 h-4 text-purple-400" />
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {page < totalPages && (

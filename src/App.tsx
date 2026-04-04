@@ -19,6 +19,8 @@ import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, User } from 'f
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { LogIn, Loader2 } from 'lucide-react';
 
+import { LongVideoStudioView } from './components/views/LongVideoStudioView';
+
 export default function App() {
   const [activeView, setActiveView] = useState<ViewType>('dashboard');
   const [user, setUser] = useState<User | null>(null);
@@ -105,6 +107,7 @@ export default function App() {
       case 'schedule': return <ScheduleView />;
       case 'templates': return <TemplatesView />;
       case 'backgrounds': return <BackgroundsView />;
+      case 'long-studio': return <LongVideoStudioView />;
       default: return <DashboardView />;
     }
   };

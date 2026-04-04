@@ -156,7 +156,7 @@ export function LibraryView() {
     
     try {
       // 1. Pre-upload verification (Client side)
-      if (!video.videoUrl) throw new Error("رابط الفيديو مفقود");
+      if (!video.videoUrl) throw new Error("لم يتم توليد الفيديو بعد. يرجى الانتظار حتى تكتمل عملية التوليد.");
       if (!video.id) throw new Error("معرف الفيديو مفقود");
       if (!channel || !channel.id) throw new Error("القناة المستهدفة مفقودة");
       
